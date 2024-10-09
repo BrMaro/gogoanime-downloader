@@ -120,7 +120,6 @@ def get_names(response):
         names.append([name, url])
     return names
 
-
 def search() -> List[Dict[str, str]]:
     """
     Search for anime and return download links for selected episodes.
@@ -129,7 +128,7 @@ def search() -> List[Dict[str, str]]:
         List[Dict[str, str]]: List of dictionaries containing episode information and download links.
     """
     while True:
-        name = input(f"{Fore.CYAN}Anime name: {Style.RESET_ALL}")
+        name = input(f"\n{Fore.YELLOW}Anime name: {Style.RESET_ALL}")
         response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={name}").text, "html.parser")
 
         try:
@@ -149,7 +148,7 @@ def search() -> List[Dict[str, str]]:
 
         while True:
             try:
-                selected_anime = int(input(f"{Fore.CYAN}Select anime number: {Style.RESET_ALL}")) - 1
+                selected_anime = int(input(f"{Fore.YELLOW}Select anime number: {Style.RESET_ALL}")) - 1
                 if 0 <= selected_anime < len(animes):
                     break
                 raise ValueError
@@ -200,8 +199,8 @@ def create_links(anime: tuple) -> List[Dict[str, str]]:
         if choice == "1":
             while True:
                 try:
-                    start = int(input(f"{Fore.CYAN}Start episode (1-{len(episodes)}): {Style.RESET_ALL}")) - 1
-                    end = int(input(f"{Fore.CYAN}End episode ({start + 2}-{len(episodes)}): {Style.RESET_ALL}"))
+                    start = int(input(f"{Fore.YELLOW}Start episode (1-{len(episodes)}): {Style.RESET_ALL}")) - 1
+                    end = int(input(f"{Fore.YELLOW}End episode ({start + 2}-{len(episodes)}): {Style.RESET_ALL}"))
                     if 0 <= start < end <= len(episodes):
                         print(
                             f"{Fore.GREEN}Preparing episodes {Fore.YELLOW}{start + 1}{Fore.GREEN} to {Fore.YELLOW}{end}{Fore.GREEN} for download...{Style.RESET_ALL}")
@@ -213,7 +212,7 @@ def create_links(anime: tuple) -> List[Dict[str, str]]:
         elif choice == "2":
             while True:
                 try:
-                    selections = input(f"{Fore.CYAN}Enter episode numbers (e.g., 1 3 5-7): {Style.RESET_ALL}")
+                    selections = input(f"{Fore.YELLOW}Enter episode numbers (e.g., 1 3 5-7): {Style.RESET_ALL}")
                     selected_episodes = parse_episode_selection(selections, len(episodes))
                     if selected_episodes:
                         ep_list = ', '.join(map(str, selected_episodes[:-1])) + (f" and {selected_episodes[-1]}" if len(
@@ -254,6 +253,120 @@ def parse_episode_selection(selections: str, max_episodes: int) -> List[int]:
     return sorted(episodes)
 
 
+def batch_download_manager():
+    batch_list = []
+    while True:
+        print(f"\n{Fore.RED}Batch Download Manager{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}1: {Fore.CYAN}Add anime to batch{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}2: {Fore.CYAN}View batch list{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}3: {Fore.CYAN}Remove anime from batch{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}4: {Fore.CYAN}Start batch download{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}5: {Fore.CYAN}Save batch list{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}6: {Fore.CYAN}Load batch list{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}7: {Fore.CYAN}Return to main menu{Style.RESET_ALL}")
+
+        choice = input(f"{Fore.YELLOW}Enter your choice: {Style.RESET_ALL}")
+
+        if choice == '1':
+            anime_info = search()
+            save_folder = input(f"{Fore.YELLOW}Enter save folder for this anime: {Style.RESET_ALL}")
+            batch_list.append({"anime": anime_info, "save_folder": save_folder})
+            print(f"{Fore.GREEN}Anime added to batch list.{Style.RESET_ALL}")
+
+        elif choice == '2':
+            if not batch_list:
+                print(f"{Fore.RED}Batch list is empty.{Style.RESET_ALL}")
+            else:
+                for i, item in enumerate(batch_list, 1):
+                    print(
+                        f"{Fore.YELLOW}{i}. {Fore.BLUE}{item['anime'][0]['url'].split('/')[-1]} - {len(item['anime'])} episodes - Save folder: {item['save_folder']}{Style.RESET_ALL}")
+
+        elif choice == '3':
+            if not batch_list:
+                print(f"{Fore.RED}Batch list is empty.{Style.RESET_ALL}")
+            else:
+                index = int(input(f"{Fore.YELLOW}Enter the number of the anime to remove: {Style.RESET_ALL}")) - 1
+                if 0 <= index < len(batch_list):
+                    removed = batch_list.pop(index)
+                    print(
+                        f"{Fore.GREEN}Removed {removed['anime'][0]['url'].split('/')[-1]} from the batch list.{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.RED}Invalid index.{Style.RESET_ALL}")
+
+        elif choice == '4':
+            if not batch_list:
+                print(f"{Fore.RED}Batch list is empty. Add some anime first.{Style.RESET_ALL}")
+            else:
+                start_batch_download(batch_list)
+
+        elif choice == '5':
+            save_batch_list(batch_list)
+
+        elif choice == '6':
+            batch_list = load_batch_list()
+
+        elif choice == '7':
+            break
+
+        else:
+            print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+
+
+def start_batch_download(batch_list: List[Dict]):
+    for item in batch_list:
+        anime_info = item['anime']
+        save_folder = item['save_folder']
+
+        print(
+            f"\n{Fore.GREEN}Starting download for {Fore.YELLOW}{anime_info[0]['url'].split('/')[-1]}{Style.RESET_ALL}")
+
+        download(anime_info, save_folder)
+
+    print(f"\n{Fore.GREEN}Batch download completed!{Style.RESET_ALL}")
+
+
+def save_batch_list(batch_list: List[Dict]):
+    filename = input(f"{Fore.CYAN}Enter filename to save batch list: {Style.RESET_ALL}")
+    with open(filename, 'w') as f:
+        json.dump(batch_list, f)
+    print(f"{Fore.GREEN}Batch list saved to {filename}{Style.RESET_ALL}")
+
+
+def load_batch_list() -> List[Dict]:
+    filename = input(f"{Fore.CYAN}Enter filename to load batch list from: {Style.RESET_ALL}")
+    try:
+        with open(filename, 'r') as f:
+            batch_list = json.load(f)
+        print(f"{Fore.GREEN}Batch list loaded from {filename}{Style.RESET_ALL}")
+        return batch_list
+    except FileNotFoundError:
+        print(f"{Fore.RED}File not found. Returning empty batch list.{Style.RESET_ALL}")
+        return []
+
+
+def main():
+    print(f"{Fore.GREEN}Welcome to the Anime Downloader!{Style.RESET_ALL}")
+
+    while True:
+        print(f"\n{Fore.GREEN}Main Menu{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}1: {Fore.BLUE}Download a single anime{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}2: {Fore.BLUE}Batch Download Manager{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}3: {Fore.BLUE}Exit{Style.RESET_ALL}")
+
+        choice = input(f"{Fore.MAGENTA}Enter your choice: {Style.RESET_ALL}")
+
+        if choice == '1':
+            links = search()
+            save_folder = input(f"{Fore.MAGENTA}Enter save folder for this anime: {Style.RESET_ALL}")
+            download(links, save_folder)
+        elif choice == '2':
+            batch_download_manager()
+        elif choice == '3':
+            print(f"{Fore.GREEN}Thank you for using the Anime Downloader. Goodbye!{Style.RESET_ALL}")
+            break
+        else:
+            print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+
+
 if __name__ == "__main__":
-    links = search()
-    download(links, f"{download_folder}/{input('Anime folder: ')}")
+    main()
