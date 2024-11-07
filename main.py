@@ -54,16 +54,16 @@ def threaded_download(task_queue, folder):
             open(file_path, "x").close()
             print(f"Created new file: {title}.mp4")
         r = requests.get(url, stream=True)
-        print(f"Started downloading {title}, episode {episode} to {file_path}.")
+        print(f"{Fore.WHITE}Started downloading {title}, episode {episode} to {file_path}.{Style.RESET_ALL}")
         with open(file_path, 'wb') as f:
             for chunk in r.iter_content(chunk_size=512 * 512):
                 if chunk:
                     f.write(chunk)
         if os.path.getsize(file_path) == 0:
-            print(f"Something went wrong while downloading {title}, retrying...")
+            print(f"{Fore.RED}Something went wrong while downloading {title}, retrying... {Style.RESET_ALL}")
             task_queue.put(item)
         else:
-            print(f"Finished downloading {title}, episode {episode} to {file_path}.")
+            print(f"{Fore.GREEN}Finished downloading {title}, episode {episode} to {file_path}.{Style.RESET_ALL}")
         task_queue.task_done()
 
 
@@ -119,6 +119,7 @@ def get_names(response):
         url = i.p.a.get("href")
         names.append([name, url])
     return names
+
 
 def search() -> List[Dict[str, str]]:
     """

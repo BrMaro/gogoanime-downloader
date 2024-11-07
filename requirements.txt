@@ -1,5 +1,5 @@
-requests
-bs4
+requests~=2.32.3
+bs4~=0.0.2
 tqdm
 json
 threading
@@ -7,3 +7,7 @@ os
 re
 time
 queue
+aiohttp~=3.10.10
+colorama~=0.4.6
+beautifulsoup4~=4.12.3
+aiofiles~=24.1.0
