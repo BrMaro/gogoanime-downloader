@@ -171,8 +171,7 @@ def create_links(anime: tuple) -> List[Dict[str, str]]:
     """
     response = BeautifulSoup(requests.get(f"{base_url}{anime[1]}").text, "html.parser")
 
-    base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'", str(response.find("script", {"src": ""}))).group(
-        1)
+    base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'", str(response.find("script", {"src": ""}))).group(1)
     movie_id = response.find("input", {"id": "movie_id"}).get("value")
     last_ep = response.find("ul", {"id": "episode_page"}).find_all("a")[-1].get("ep_end")
 
