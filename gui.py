@@ -126,17 +126,10 @@ class Ui_MainWindow(object):
         self.searchButton.clicked.connect(self.perform_search)
         self.downloadButton.clicked.connect(self.perform_download)
 
-    def switch_mode(self, button):
-        # Show/hide list or table depending on mode
-        if button == self.radioButton_single:
-            self.AnimeSearchResults.setVisible(True)
-            self.AnimeBatchList.setVisible(False)
-        elif button == self.radioButton_batch:
-            self.AnimeSearchResults.setVisible(False)
-            self.AnimeBatchList.setVisible(True)
 
     def perform_search(self):
         print("Search")
+
         def get_names(response):
             titles = response.find("ul", {"class": "items"}).find_all("li")
             names = []
