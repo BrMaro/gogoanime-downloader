@@ -86,17 +86,13 @@ class DownloadManager:
         self.worker_tasks = []
 
     async def start(self):
-        print(1)
         self.session = aiohttp.ClientSession()
-        print(2)
         workers = [self._worker() for _ in range(self.max_concurrent)]
-        print(3)
         # Create worker tasks but don't wait for them
         self.worker_tasks = [
             asyncio.create_task(self._worker())
             for _ in range(self.max_concurrent)
         ]
-        print(4)
 
     async def stop(self):
         """Stop the download manager and clean up"""
@@ -642,6 +638,39 @@ def download_link(link):
     return [backup_link[0],
             title]  #if the prefered download quality is not available the highest quality will automaticly be chosen
 
+
+async def download_link_async(session, link):
+    """Async version of download_link function"""
+    async with session.get(link) as response:
+        soup = BeautifulSoup(await response.text(), "html.parser")
+        base_download_url = BeautifulSoup(str(soup.find("li", {"class": "dowloads"})), "html.parser").a.get("href")
+        id = base_download_url[base_download_url.find("id=") + 3:base_download_url.find("&typesub")]
+        base_download_url = base_download_url[:base_download_url.find("id=")]
+
+        async with session.post(f"{base_download_url}&id={id}") as response:
+            title = BeautifulSoup(await response.text(), "html.parser")
+            title = clean_filename(title.find("span", {"id": "title"}).text)
+
+        async with session.post(f"{base_download_url}&id={id}&captcha_v3={captcha_v3}") as response:
+            soup = BeautifulSoup(await response.text(), "html.parser")
+            backup_link = []
+
+            for i in soup.find_all("div", {"class": "dowload"}):
+                if str(BeautifulSoup(str(i), "html.parser").a).__contains__('download=""'):
+                    link = (BeautifulSoup(str(i), "html.parser").a.get("href"))
+                    quality = BeautifulSoup(str(i), "html.parser").a.string.replace(" ", "").replace("Download", "")
+                    try:
+                        quality = int(quality[2:quality.find("P")])
+                    except ValueError:
+                        print("Failed to parse quality information. Using default quality.")
+                        quality = 0
+                    if quality == download_quality:
+                        print(f"Downloading in {quality}p")
+                        return [link, title]
+                    backup_link = [link, quality]
+
+            print(f"Downloading in {backup_link[1]}p")
+            return [backup_link[0], title]
 
 async def download_episodes(episodes: List[dict], anime_name: str, save_path: str):
     """Downloads multiple episodes using the download manager"""
