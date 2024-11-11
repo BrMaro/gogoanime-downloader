@@ -6,12 +6,13 @@ import asyncio
 import os
 import aiohttp
 import aiofiles
-from dataclasses import dataclass
+from dataclasses import dataclass,asdict
 from typing import List, Dict, Optional, Callable
 from enum import Enum
 from datetime import datetime
 import re
 from pathlib import Path
+
 
 f = open("setup.json", "r")
 setup = json.load(f)
@@ -82,42 +83,92 @@ class DownloadManager:
         self.download_queue = asyncio.Queue()
         self.session: Optional[aiohttp.ClientSession] = None
         self.running = True
+        self.worker_tasks = []
 
     async def start(self):
+        print(1)
         self.session = aiohttp.ClientSession()
+        print(2)
         workers = [self._worker() for _ in range(self.max_concurrent)]
-        await asyncio.gather(*workers)
+        print(3)
+        # Create worker tasks but don't wait for them
+        self.worker_tasks = [
+            asyncio.create_task(self._worker())
+            for _ in range(self.max_concurrent)
+        ]
+        print(4)
 
     async def stop(self):
+        """Stop the download manager and clean up"""
         self.running = False
+
+        # Cancel all remaining downloads
+        while not self.download_queue.empty():
+            try:
+                task = self.download_queue.get_nowait()
+                task.state = DownloadState.CANCELLED
+                self.download_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+
+        # Cancel all worker tasks
+        for worker_task in self.worker_tasks:
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+
+        # Close the session
         if self.session:
             await self.session.close()
+            self.session = None
+
+        self.worker_tasks = []
 
     def add_download(self, url: str, filename: str, folder: str, episode: int) -> DownloadTask:
+        """Add a new download task to the queue"""
         task = DownloadTask(url, filename, folder, episode)
         task.setup_progress_ui()
+        # Create task for queuing download
         asyncio.create_task(self.download_queue.put(task))
         self.active_downloads[task.file_path] = task
         return task
 
     async def _worker(self):
-        while self.running:
-            task: DownloadTask = await self.download_queue.get()
+        """Worker coroutine that processes downloads from the queue"""
+        try:
+            while self.running:
+                try:
+                    # Use timeout to allow checking self.running periodically
+                    task: DownloadTask = await asyncio.wait_for(
+                        self.download_queue.get(),
+                        timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
 
-            if task.state == DownloadState.CANCELLED:
-                self.download_queue.task_done()
-                continue
+                if task.state == DownloadState.CANCELLED:
+                    self.download_queue.task_done()
+                    continue
 
-            try:
-                await self._process_download(task)
-            except Exception as e:
-                task.state = DownloadState.ERROR
-                if task.status_text:
-                    task.status_text.error(f"Error downloading episode {task.episode}: {str(e)}")
-            finally:
-                self.download_queue.task_done()
+                try:
+                    await self._process_download(task)
+                except Exception as e:
+                    task.state = DownloadState.ERROR
+                    if task.status_text:
+                        task.status_text.error(f"Error downloading episode {task.episode}: {str(e)}")
+                finally:
+                    self.download_queue.task_done()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"Worker error: {str(e)}")
 
     async def _process_download(self, task: DownloadTask):
+        """Process a single download task"""
         if not os.path.exists(task.folder):
             os.makedirs(task.folder)
 
@@ -127,38 +178,45 @@ class DownloadManager:
         task.start_time = datetime.now()
         task.state = DownloadState.DOWNLOADING
 
-        async with self.session.get(task.url) as response:
-            total_size = int(response.headers.get('content-length', 0))
-            task.progress.total_bytes = total_size
-            downloaded = 0
+        try:
+            async with self.session.get(task.url) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                task.progress.total_bytes = total_size
+                downloaded = 0
 
-            async with aiofiles.open(task.file_path, 'wb') as file:
-                async for chunk in response.content.iter_chunked(512 * 512):
-                    if task.cancel_event.is_set():
-                        task.state = DownloadState.CANCELLED
-                        return
+                async with aiofiles.open(task.file_path, 'wb') as file:
+                    async for chunk in response.content.iter_chunked(512 * 512):
+                        if task.cancel_event.is_set():
+                            task.state = DownloadState.CANCELLED
+                            return
 
-                    await task.pause_event.wait()
+                        await task.pause_event.wait()
 
-                    await file.write(chunk)
-                    downloaded += len(chunk)
+                        await file.write(chunk)
+                        downloaded += len(chunk)
 
-                    elapsed_time = (datetime.now() - task.start_time).total_seconds()
-                    speed = downloaded / elapsed_time if elapsed_time > 0 else 0
-                    percentage = (downloaded / total_size * 100) if total_size > 0 else 0
+                        elapsed_time = (datetime.now() - task.start_time).total_seconds()
+                        speed = downloaded / elapsed_time if elapsed_time > 0 else 0
+                        percentage = (downloaded / total_size * 100) if total_size > 0 else 0
 
-                    task.progress = DownloadProgress(
-                        total_bytes=total_size,
-                        downloaded_bytes=downloaded,
-                        speed=speed,
-                        percentage=percentage
-                    )
-                    task.update_progress()
+                        task.progress = DownloadProgress(
+                            total_bytes=total_size,
+                            downloaded_bytes=downloaded,
+                            speed=speed,
+                            percentage=percentage
+                        )
+                        task.update_progress()
 
-        if task.state != DownloadState.CANCELLED:
-            task.state = DownloadState.COMPLETED
+            if task.state != DownloadState.CANCELLED:
+                task.state = DownloadState.COMPLETED
+                if task.status_text:
+                    task.status_text.success(f"Episode {task.episode} downloaded successfully!")
+
+        except Exception as e:
+            task.state = DownloadState.ERROR
             if task.status_text:
-                task.status_text.success(f"Episode {task.episode} downloaded successfully!")
+                task.status_text.error(f"Download error for episode {task.episode}: {str(e)}")
+            raise
 
 
 @dataclass
@@ -168,41 +226,142 @@ class AnimeDownloadItem:
     episodes: List[int]
     total_episodes: int
 
+    def to_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            name=data['name'],
+            url=data['url'],
+            episodes=data['episodes'],
+            total_episodes=data['total_episodes']
+        )
+
 
 class BatchManager:
     def __init__(self):
         self.download_list: List[AnimeDownloadItem] = []
+        self.save_directory = Path("batch_lists")
+        self.save_directory.mkdir(exist_ok=True)
 
     def add_item(self, item: AnimeDownloadItem):
+        # Check for duplicates
+        if any(existing.name == item.name for existing in self.download_list):
+            raise ValueError(f"Anime '{item.name}' already exists in the batch list")
         self.download_list.append(item)
 
     def remove_item(self, index: int):
         if 0 <= index < len(self.download_list):
-            self.download_list.pop(index)
+            return self.download_list.pop(index)
+        raise IndexError("Invalid index for batch list removal")
 
-    def save_list(self, filename: str):
-        data = []
-        for item in self.download_list:
-            data.append({
-                'name': item.name,
-                'url': item.url,
-                'episodes': item.episodes,
-                'total_episodes': item.total_episodes
-            })
-        with open(filename, 'w') as f:
-            json.dump(data, f)
+    def clear_list(self):
+        self.download_list.clear()
 
-    def load_list(self, filename: str):
-        with open(filename, 'r') as f:
-            data = json.load(f)
-            self.download_list = []
-            for item in data:
-                self.download_list.append(AnimeDownloadItem(
-                    name=item['name'],
-                    url=item['url'],
-                    episodes=item['episodes'],
-                    total_episodes=item['total_episodes']
-                ))
+    def get_all_saved_lists(self) -> List[Path]:
+        """Returns a list of all saved batch files."""
+        return sorted(self.save_directory.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)
+
+    def save_list(self, filename: str) -> Path:
+        """
+        Save the current batch list to a JSON file.
+        Returns the path to the saved file.
+        """
+        if not filename.endswith('.json'):
+            filename += '.json'
+
+        save_path = self.save_directory / filename
+
+        # Create backup if file exists
+        if save_path.exists():
+            backup_name = f"{save_path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            backup_path = self.save_directory / backup_name
+            save_path.rename(backup_path)
+
+        data = {
+            "version": "1.0",
+            "created_at": datetime.now().isoformat(),
+            "items": [item.to_dict() for item in self.download_list]
+        }
+
+        try:
+            with open(save_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return save_path
+        except Exception as e:
+            if backup_path.exists():
+                backup_path.rename(save_path)  # Restore backup if save fails
+            raise IOError(f"Failed to save batch list: {str(e)}")
+
+    def load_list(self, filename: Path) -> bool:
+        """
+        Load a batch list from a JSON file.
+        Returns True if successful, raises exception otherwise.
+        """
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Validate file format
+            if not isinstance(data, dict) or "items" not in data:
+                raise ValueError("Invalid batch list file format")
+
+            # Create new list from loaded data
+            new_list = []
+            for item_data in data["items"]:
+                try:
+                    new_list.append(AnimeDownloadItem.from_dict(item_data))
+                except (KeyError, TypeError) as e:
+                    raise ValueError(f"Invalid item data in batch list: {str(e)}")
+
+            # Only update if all items were loaded successfully
+            self.download_list = new_list
+            return True
+
+        except json.JSONDecodeError:
+            raise ValueError("Invalid JSON format in batch list file")
+        except Exception as e:
+            raise IOError(f"Failed to load batch list: {str(e)}")
+
+    def merge_list(self, filename: Path) -> int:
+        """
+        Merge another batch list into the current one.
+        Returns the number of new items added.
+        """
+        temp_manager = BatchManager()
+        temp_manager.load_list(filename)
+
+        added_count = 0
+        for item in temp_manager.download_list:
+            try:
+                self.add_item(item)
+                added_count += 1
+            except ValueError:
+                continue  # Skip duplicates
+
+        return added_count
+
+    def export_list(self, filename: str, format: str = 'json') -> Path:
+        """
+        Export the batch list in different formats.
+        Currently supports: json, txt
+        Returns the path to the exported file.
+        """
+        export_path = self.save_directory / filename
+
+        if format == 'json':
+            return self.save_list(filename)
+        elif format == 'txt':
+            with open(export_path.with_suffix('.txt'), 'w', encoding='utf-8') as f:
+                for item in self.download_list:
+                    f.write(f"Anime: {item.name}\n")
+                    f.write(f"Episodes: {', '.join(map(str, item.episodes))}\n")
+                    f.write(f"Total Episodes: {item.total_episodes}\n")
+                    f.write("-" * 50 + "\n")
+            return export_path.with_suffix('.txt')
+        else:
+            raise ValueError(f"Unsupported export format: {format}")
 
 
 class DownloadPageManager:
@@ -244,7 +403,6 @@ def downloads_page():
         if anime_name not in downloads_by_anime:
             downloads_by_anime[anime_name]=[]
         downloads_by_anime[anime_name].append(download)
-
 
     # Display downloads grouped by anime
     for anime_name, downloads in downloads_by_anime.items():
@@ -362,47 +520,51 @@ def batch_download_page():
                         except ValueError:
                             st.error("Invalid episode selection format")
 
-    # Manage List Tab
+    # In the Manage List Tab
     with tab2:
         st.header("Manage Batch List")
 
-        # Save/Load list
-        col1, col2 = st.columns(2)
+        # Save/Load/Export section
+        col1, col2, col3 = st.columns(3)
+
         with col1:
             save_name = st.text_input("Save list as:", value="batch_list.json")
             if st.button("Save List"):
                 try:
-                    save_path = Path("batch_lists")
-                    save_path.mkdir(exist_ok=True)
-                    st.session_state.batch_manager.save_list(save_path / save_name)
-                    st.success("List saved successfully!")
+                    saved_path = st.session_state.batch_manager.save_list(save_name)
+                    st.success(f"List saved as {saved_path.name}")
                 except Exception as e:
                     st.error(f"Error saving list: {str(e)}")
 
         with col2:
-            saved_lists = list(Path("batch_lists").glob("*.json")) if Path("batch_lists").exists() else []
+            saved_lists = st.session_state.batch_manager.get_all_saved_lists()
             if saved_lists:
                 selected_list = st.selectbox("Load saved list:", saved_lists)
+                load_method = st.radio("Load method:", ["Replace", "Merge"])
                 if st.button("Load List"):
                     try:
-                        st.session_state.batch_manager.load_list(selected_list)
-                        st.success("List loaded successfully!")
+                        if load_method == "Replace":
+                            st.session_state.batch_manager.load_list(selected_list)
+                            st.success("List loaded successfully!")
+                        else:
+                            added = st.session_state.batch_manager.merge_list(selected_list)
+                            st.success(f"Merged successfully! Added {added} new items.")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Error loading list: {str(e)}")
+            else:
+                st.info("No saved lists found")
 
-        # Display current list
-        st.subheader("Current Batch List")
-        if st.session_state.batch_manager.download_list:
-            for idx, item in enumerate(st.session_state.batch_manager.download_list):
-                with st.expander(f"{item.name} ({len(item.episodes)} episodes)"):
-                    st.write(f"Episodes: {', '.join(map(str, item.episodes))}")
-                    if st.button("Remove", key=f"remove_{idx}"):
-                        st.session_state.batch_manager.remove_item(idx)
-                        st.rerun()
-        else:
-            st.info("No items in batch list")
+        with col3:
+            export_format = st.selectbox("Export format:", ["json", "txt"])
+            export_name = st.text_input("Export filename:", value="exported_list")
+            if st.button("Export List"):
+                try:
+                    export_path = st.session_state.batch_manager.export_list(export_name, export_format)
+                    st.success(f"List exported as {export_path.name}")
+                except Exception as e:
+                    st.error(f"Error exporting list: {str(e)}")
 
-    # Start Download Tab
     with tab3:
         st.header("Start Batch Download")
         if not st.session_state.batch_manager.download_list:
@@ -413,17 +575,39 @@ def batch_download_page():
             st.write(f"Total episodes: {total_episodes}")
 
             if st.button("Start Batch Download"):
-                st.write("### Download Progress")
+                if 'download_started' not in st.session_state:
+                    st.session_state.download_started = True
 
-                # Create progress tracking for all downloads
-                for item in st.session_state.batch_manager.download_list:
-                    st.write(f"#### {item.name}")
-                    download_path = os.path.join(save_path, item.name)
-                    asyncio.run(download_episodes(
-                        [{"episode": ep} for ep in item.episodes],
-                        item.name,
-                        download_path
-                    ))
+                    # Initialize download manager if needed
+                    if 'download_manager' not in st.session_state:
+                        st.session_state.download_manager = DownloadManager()
+
+                    st.write("### Download Progress")
+
+                    for item in st.session_state.batch_manager.download_list:
+                        st.write(f"#### {item.name}")
+                        download_path = os.path.join(save_path, item.name)
+
+                        # Create episode list in the format expected by download_episodes
+                        episode_list = [
+                            {"episode": str(ep), "url": f"{base_url}{item.url}/ep-{ep}"}
+                            for ep in item.episodes
+                        ]
+
+                        try:
+                            # Use asyncio.create_task instead of asyncio.run
+                            asyncio.create_task(
+                                download_episodes(
+                                    episode_list,
+                                    item.name,
+                                    download_path
+                                )
+                            )
+                        except Exception as e:
+                            st.error(f"Error starting download for {item.name}: {str(e)}")
+
+                    # Redirect to downloads page
+                    st.switch_page("Downloads")
 
 
 def clean_filename(filename):
@@ -459,16 +643,55 @@ def download_link(link):
             title]  #if the prefered download quality is not available the highest quality will automaticly be chosen
 
 
-async def download_episodes(episodes, anime_name, save_path):
-    if 'download_page_manager' not in st.session_state:
-        st.session_state.download_page_manager = DownloadPageManager()
+async def download_episodes(episodes: List[dict], anime_name: str, save_path: str):
+    """Downloads multiple episodes using the download manager"""
+    if 'download_manager' not in st.session_state:
+        st.session_state.download_manager = DownloadManager()
 
-    # Add downloads to the manager
-    st.session_state.download_page_manager.add_download(anime_name, episodes, save_path)
+    download_manager = st.session_state.download_manager
+    try:
+        # Start the download manager if it's not running
+        if not hasattr(download_manager, 'session') or download_manager.session is None:
+            print('before donwloader  starts')
+            await download_manager.start()
+            print("after downloader starts")
 
-    # Switch to downloads page
-    st.session_state.page = "Downloads"
-    st.rerun()
+        download_tasks = []
+        for episode in episodes:
+            try:
+                # Get the episode page content using the manager's session
+                async with download_manager.session.get(episode['url']) as response:
+                    page_content = await response.text()
+                    episode_page = BeautifulSoup(page_content, 'html.parser')
+                    download_url = episode_page.find('a', {'class': 'download-link'}).get('href')
+
+                    # Create filename
+                    filename = f"{anime_name}_episode_{episode['episode']}.mp4"
+
+                    # Queue the download task
+                    download_task = download_manager.add_download(
+                        url=download_url,
+                        filename=filename,
+                        folder=save_path,
+                        episode=int(episode['episode'])
+                    )
+                    download_tasks.append(download_task)
+            except Exception as e:
+                st.error(f"Error processing episode {episode['episode']}: {str(e)}")
+                continue
+
+            # Wait for all download tasks to complete
+        await asyncio.gather(*download_tasks, return_exceptions=True)
+
+    except Exception as e:
+        st.error(f"Download manager error: {str(e)}")
+        raise e
+    finally:
+        # Always try to stop the download manager
+        try:
+            await download_manager.stop()
+        except Exception as e:
+            st.error(f"Error stopping download manager: {str(e)}")
 
 
 def get_names(response):
@@ -514,7 +737,6 @@ def single_download_page():
 
     save_path = save_folder_picker()
 
-
     col1, col2 = st.columns(2)
     anime_name = col1.text_input("Enter Anime name: ", placeholder="Search")
     response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={anime_name}").text, "html.parser")
@@ -523,7 +745,6 @@ def single_download_page():
         pages = response.find("ul", {"class": "pagination-list"}).find_all("li")
         animes = [anime for page in pages for anime in get_names(
             BeautifulSoup(requests.get(f"{base_url}/search.html{page.a.get('href')}").text, "html.parser"))]
-        print(animes[0], animes[0][0])
     except AttributeError:
         animes = get_names(response)
 
@@ -551,14 +772,11 @@ def single_download_page():
 
         # Get episodes data
         response = BeautifulSoup(requests.get(f"{base_url}{st.session_state.selected_anime[1]}").text, "html.parser")
-        base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'",
-                                     str(response.find("script", {"src": ""}))).group(1)
+        base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'",str(response.find("script", {"src": ""}))).group(1)
         movie_id = response.find("input", {"id": "movie_id"}).get("value")
         last_ep = response.find("ul", {"id": "episode_page"}).find_all("a")[-1].get("ep_end")
 
-        episodes_response = BeautifulSoup(requests.get(f"{base_url_cdn_api}ajax/load-list-episode?ep_start=0&ep_end={last_ep}&id={movie_id}").text,
-            "html.parser"
-        ).find_all("a")
+        episodes_response = BeautifulSoup(requests.get(f"{base_url_cdn_api}ajax/load-list-episode?ep_start=0&ep_end={last_ep}&id={movie_id}").text,"html.parser").find_all("a")
 
         episodes = [
             {
@@ -580,24 +798,43 @@ def single_download_page():
         if download_method == "Range":
             col1, col2 = st.columns(2)
             with col1:
-                start = st.number_input("Start episode", min_value=1, max_value=len(episodes), value=1) - 1
+                start = st.number_input("Start episode", min_value=1, max_value=len(episodes), value=1)
+                print(start)
             with col2:
-                end = st.number_input("End episode", min_value=start + 2, max_value=len(episodes),
-                                      value=min(start + 2, len(episodes)))
+                end = st.number_input("End episode", min_value=start + 1, max_value=len(episodes), value=min(start + 1, len(episodes)))
+                print(end)
 
             if st.button("Download Range"):
-                selected_episodes = episodes[start:end]
-                st.session_state.episodes_to_download = selected_episodes
-                print(st.session_state.selected_anime[0], selected_episodes)
+                if 'download_started' not in st.session_state:
+                    st.session_state.download_started = True
+                    selected_episodes = episodes[start-1:end]
+                    for i in selected_episodes:
+                        print(i)
+                    save_path = os.path.join(download_folder, anime_name)
+                    print(save_path)
+                    st.session_state.episodes_to_download = selected_episodes
 
-                # Create a new section for downloads
-                st.write("### Downloads")
+                    try:
+                        # Use asyncio.create_task instead of asyncio.run
+                        # Create new event loop and run the download
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
 
-                # Run the download process
-                asyncio.run(download_episodes(
-                    selected_episodes,
-                    st.session_state.selected_anime[0]
-                ))
+                        # Run the download in the event loop
+                        loop.run_until_complete(
+                            download_episodes(
+                                selected_episodes,
+                                st.session_state.selected_anime[0],
+                                save_path
+                            )
+                        )
+                        loop.close()
+                        st.switch_page("Downloads")
+                    except Exception as e:
+                        st.session_state.download_started = False
+                        st.error(f"Error starting download: {str(e)}")
+                        raise e  # Re-raise for debugging
+
 
         else:
             episode_input = st.text_input(
@@ -610,18 +847,23 @@ def single_download_page():
                     selected_numbers = parse_episode_selection(episode_input, len(episodes))
                     selected_episodes = [episodes[ep - 1] for ep in selected_numbers]
                     st.session_state.episodes_to_download = selected_episodes
-                    print(st.session_state.selected_anime[0], selected_episodes)
+                    save_path = os.path.join(download_folder, anime_name)
+
+                    # print(st.session_state.selected_anime[0], selected_episodes)
 
                     # Create a new section for downloads
                     st.write("### Downloads")
 
                     # Run the download process
-                    asyncio.run(
+                    asyncio.create_task(
                         download_episodes(
                             selected_episodes,
-                            st.session_state.selected_anime[0]
+                            st.session_state.selected_anime[0],
+                            save_path
                         )
                     )
+                    st.switch_page("Downloads")
+
                 except ValueError:
                     st.error("Invalid episode selection. Please try again.")
 
@@ -634,6 +876,8 @@ def single_download_page():
 def main():
     st.sidebar.title("Anime Downloader")
     page = st.sidebar.radio("Navigation", ["Search", "Batch", "Downloads"])
+
+    print(st.session_state)
 
     if page == "Search":
         single_download_page()
