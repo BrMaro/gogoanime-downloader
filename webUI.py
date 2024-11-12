@@ -86,8 +86,9 @@ class DownloadManager:
         self.worker_tasks = []
 
     async def start(self):
-        self.session = aiohttp.ClientSession()
-        workers = [self._worker() for _ in range(self.max_concurrent)]
+        if self.session is None:
+            self.session = aiohttp.ClientSession()
+
         # Create worker tasks but don't wait for them
         self.worker_tasks = [
             asyncio.create_task(self._worker())
@@ -122,12 +123,12 @@ class DownloadManager:
 
         self.worker_tasks = []
 
-    def add_download(self, url: str, filename: str, folder: str, episode: int) -> DownloadTask:
+    async def add_download(self, url: str, filename: str, folder: str, episode: int) -> DownloadTask:
         """Add a new download task to the queue"""
         task = DownloadTask(url, filename, folder, episode)
         task.setup_progress_ui()
-        # Create task for queuing download
-        asyncio.create_task(self.download_queue.put(task))
+        # Now we await putting the task in the queue
+        await self.download_queue.put(task)
         self.active_downloads[task.file_path] = task
         return task
 
@@ -168,14 +169,14 @@ class DownloadManager:
         if not os.path.exists(task.folder):
             os.makedirs(task.folder)
 
-        async with aiofiles.open(task.file_path, 'wb') as f:
-            pass
-
         task.start_time = datetime.now()
         task.state = DownloadState.DOWNLOADING
 
         try:
             async with self.session.get(task.url) as response:
+                if response.status != 200:
+                    raise Exception(f"HTTP {response.status}: Failed to download {task.url}")
+
                 total_size = int(response.headers.get('content-length', 0))
                 task.progress.total_bytes = total_size
                 downloaded = 0
@@ -186,7 +187,8 @@ class DownloadManager:
                             task.state = DownloadState.CANCELLED
                             return
 
-                        await task.pause_event.wait()
+                        if task.pause_event is not None:
+                            await task.pause_event.wait()
 
                         await file.write(chunk)
                         downloaded += len(chunk)
@@ -203,12 +205,18 @@ class DownloadManager:
                         )
                         task.update_progress()
 
+            if downloaded == 0:
+                raise Exception("Downloaded file is empty")
+
             if task.state != DownloadState.CANCELLED:
                 task.state = DownloadState.COMPLETED
                 if task.status_text:
                     task.status_text.success(f"Episode {task.episode} downloaded successfully!")
 
         except Exception as e:
+            # If download fails, remove the empty file
+            if os.path.exists(task.file_path):
+                os.remove(task.file_path)
             task.state = DownloadState.ERROR
             if task.status_text:
                 task.status_text.error(f"Download error for episode {task.episode}: {str(e)}")
@@ -672,45 +680,46 @@ async def download_link_async(session, link):
             print(f"Downloading in {backup_link[1]}p")
             return [backup_link[0], title]
 
+
 async def download_episodes(episodes: List[dict], anime_name: str, save_path: str):
     """Downloads multiple episodes using the download manager"""
     if 'download_manager' not in st.session_state:
         st.session_state.download_manager = DownloadManager()
 
     download_manager = st.session_state.download_manager
+
     try:
         # Start the download manager if it's not running
         if not hasattr(download_manager, 'session') or download_manager.session is None:
-            print('before donwloader  starts')
             await download_manager.start()
-            print("after downloader starts")
 
         download_tasks = []
         for episode in episodes:
             try:
-                # Get the episode page content using the manager's session
-                async with download_manager.session.get(episode['url']) as response:
-                    page_content = await response.text()
-                    episode_page = BeautifulSoup(page_content, 'html.parser')
-                    download_url = episode_page.find('a', {'class': 'download-link'}).get('href')
+                # Get the legitimate download link using the async version
+                download_info = await download_link_async(download_manager.session, episode['url'])
+                download_url = download_info[0]
+                episode_title = download_info[1]
 
-                    # Create filename
-                    filename = f"{anime_name}_episode_{episode['episode']}.mp4"
+                # Create filename using the extracted title
+                filename = f"{episode_title}_episode_{episode['episode']}.mp4"
 
-                    # Queue the download task
-                    download_task = download_manager.add_download(
-                        url=download_url,
-                        filename=filename,
-                        folder=save_path,
-                        episode=int(episode['episode'])
-                    )
-                    download_tasks.append(download_task)
+                # Queue the download task - now awaiting the add_download
+                download_task = await download_manager.add_download(
+                    url=download_url,
+                    filename=filename,
+                    folder=save_path,
+                    episode=int(episode['episode'])
+                )
+                download_tasks.append(download_task)
             except Exception as e:
                 st.error(f"Error processing episode {episode['episode']}: {str(e)}")
                 continue
 
-            # Wait for all download tasks to complete
-        await asyncio.gather(*download_tasks, return_exceptions=True)
+        # Since tasks are already running, we just need to wait for them to complete
+        for task in download_tasks:
+            while task.state not in [DownloadState.COMPLETED, DownloadState.ERROR, DownloadState.CANCELLED]:
+                await asyncio.sleep(0.1)
 
     except Exception as e:
         st.error(f"Download manager error: {str(e)}")
