@@ -88,7 +88,7 @@ Replace the values in the setup.json file with your preferred settings:
 ## Usage
 Simply run the script using Python:
 ```
-python anime_downloader.py
+python main.py
 ```
 Follow the on-screen prompts to:
 
