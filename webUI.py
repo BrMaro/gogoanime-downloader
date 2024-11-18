@@ -515,17 +515,11 @@ def batch_download_page():
 
     st.title("Batch Download Manager")
 
-    # Save Location
-    save_path = save_folder_picker()
+    tab1, tab2, tab3, tab4 = st.tabs(["Add Anime","View Current List", "Manage List", "Start Download"])
 
-    # Tabs for different functions
-    tab1, tab2, tab3 = st.tabs(["Add Anime", "Manage List", "Start Download"])
-
-    # Add Anime Tab
     with tab1:
         st.header("Add Anime to Batch")
 
-        # Search functionality
         anime_name = st.text_input("Search Anime:", key="batch_search")
         if anime_name:
             response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={anime_name}").text, "html.parser")
@@ -537,7 +531,7 @@ def batch_download_page():
                 animes = get_names(response)
 
             if animes:
-                selected_anime = st.selectbox("Select Anime:", [name for name, _ in animes])
+                selected_anime = st.radio("Select Anime:", [name for name, _ in animes])
                 if selected_anime:
                     selected_index = [name for name, _ in animes].index(selected_anime)
                     selected_url = animes[selected_index][1]
@@ -572,8 +566,59 @@ def batch_download_page():
                         except ValueError:
                             st.error("Invalid episode selection format")
 
-    # In the Manage List Tab
     with tab2:
+        st.header("View Current list")
+        if st.session_state.batch_manager.download_list:
+            selected_anime = st.radio(
+                "Select anime to modify:",
+                [item.name for item in st.session_state.batch_manager.download_list]
+            )
+
+            if selected_anime:
+                # Find the selected anime item
+                anime_item = next(
+                    item for item in st.session_state.batch_manager.download_list
+                    if item.name == selected_anime
+                )
+
+                # Display current episodes
+                st.write("Current episodes:",
+                         ', '.join(str(ep) for ep in sorted(anime_item.episodes)))
+
+                # Modify episodes
+                new_episodes = st.text_input(
+                    "Modify episodes (e.g., 1 3 5-7):",
+                    key=f"modify_{selected_anime}"
+                )
+
+                if st.button("Update Episodes"):
+                    try:
+                        new_episode_list = parse_episode_selection(
+                            new_episodes,
+                            anime_item.total_episodes
+                        )
+                        if new_episode_list:
+                            # Update the episodes
+                            anime_item.episodes = new_episode_list
+                            st.success("Episodes updated successfully!")
+                            st.rerun()
+                        else:
+                            st.error("Invalid episode selection")
+                    except ValueError:
+                        st.error("Invalid episode selection format")
+
+                # Option to remove anime from list
+                if st.button("Remove from List", key=f"remove_{selected_anime}"):
+                    st.session_state.batch_manager.download_list = [
+                        item for item in st.session_state.batch_manager.download_list
+                        if item.name != selected_anime
+                    ]
+                    st.success(f"Removed {selected_anime} from list")
+                    st.rerun()
+        else:
+            st.info("No anime in the list")
+
+    with tab3:
         st.header("Manage Batch List")
 
         # Save/Load/Export section
@@ -617,7 +662,7 @@ def batch_download_page():
                 except Exception as e:
                     st.error(f"Error exporting list: {str(e)}")
 
-    with tab3:
+    with tab4:
         st.header("Start Batch Download")
         if not st.session_state.batch_manager.download_list:
             st.warning("Batch list is empty. Please add some anime first.")
@@ -969,8 +1014,8 @@ def main():
         single_download_page()
     elif page == "Batch":
         batch_download_page()
-    # elif page == "Settings":
-    #     settings_page()
+    elif page == "Settings":
+        settings_page()
     else:
         downloads_page()
 
