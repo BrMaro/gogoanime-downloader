@@ -1,3 +1,4 @@
+import pprint
 import streamlit as st
 import json
 from bs4 import BeautifulSoup
@@ -74,6 +75,17 @@ class DownloadTask:
                 f"{self.progress.total_bytes / 1024 / 1024:.1f} MB) - "
                 f"Speed: {self.progress.speed / 1024 / 1024:.1f} MB/s"
             )
+
+            # Update the download page manager
+            if 'download_page_manager' in st.session_state:
+                st.session_state.download_page_manager.update_download_progress(
+                    url=self.url,
+                    status='downloading' if self.state == DownloadState.DOWNLOADING else str(self.state.value),
+                    progress=self.progress.percentage,
+                    downloaded_bytes=self.progress.downloaded_bytes,
+                    total_bytes=self.progress.total_bytes,
+                    speed=self.progress.speed
+                )
 
 
 class DownloadManager:
@@ -243,6 +255,7 @@ class AnimeDownloadItem:
         )
 
 
+# Manage Batch page
 class BatchManager:
     def __init__(self):
         self.download_list: List[AnimeDownloadItem] = []
@@ -374,25 +387,68 @@ class DownloadPageManager:
             st.session_state.downloads = []
         if 'download_manager' not in st.session_state:
             st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
+        if 'active_downloads' not in st.session_state:
+            st.session_state.active_downloads = set()
 
-    @property
-    def downloads(self):
-        return st.session_state.downloads
+    async def start_downloads(self):
+        """Process any queued downloads that aren't already being processed"""
+        download_manager = st.session_state.download_manager
 
-    def add_download(self, anime_name: str, episodes: List[dict], save_path: str):
-        for episode in episodes:
-            self.downloads.append({
-                'anime_name': anime_name,
-                'episode': episode['episode'],
-                'status': 'queued',
-                'progress': 0,
-                'speed': 0,
-                'save_path': save_path,
-                'url': episode['url'],
-                'downloaded_bytes': 0,
-                'total_bytes': 0,
-                'start_time': None
-            })
+        # Start download manager if needed
+        if not hasattr(download_manager, 'session') or download_manager.session is None:
+            await download_manager.start()
+
+        downloads_by_anime = {}
+        for download in self.downloads:
+            if download['status'] == 'queued' and download['url'] not in st.session_state.active_downloads:
+                anime_name = download['anime-name']
+                if anime_name not in downloads_by_anime:
+                    downloads_by_anime[anime_name]=[]
+                downloads_by_anime[anime_name].append(download)
+
+        for anime_name, anime_downloads in downloads_by_anime.items():
+            try:
+                episodes = [{
+                    'url': download['url'],
+                    'episode': download['episode']
+                } for download in anime_downloads]
+
+                for download in anime_downloads:
+                    st.session_state.active_downloads.add(download['url'])
+
+                # Start the download process
+                asyncio.create_task(self.process_anime_downloads(
+                    episodes=episodes,
+                    anime_name=anime_name,
+                    save_path=anime_downloads[0]['save_path']
+                ))
+
+            except Exception as e:
+                st.error(f"Error starting downloads for {anime_name}: {str(e)}")
+
+    async def process_anime_downloads(self, episodes: List[dict], anime_name: str, save_path: str):
+        """Process downloads for a specific anime"""
+        try:
+            await download_episodes(episodes, anime_name, save_path)
+        except Exception as e:
+            st.error(f"Error downloading {anime_name}: {str(e)}")
+        finally:
+            # Remove from active downloads
+            for episode in episodes:
+                st.session_state.active_downloads.discard(episode['url'])
+
+    def update_download_progress(self, url: str, status: str, progress: float = 0,
+                                 downloaded_bytes: int = 0, total_bytes: int = 0,
+                                 speed: float = 0):
+        """Update the progress of a specific download"""
+        for download in self.downloads:
+            if download['url'] == url:
+                download['status'] = status
+                download['progress'] = progress
+                download['downloaded_bytes'] = downloaded_bytes
+                download['total_bytes'] = total_bytes
+                download['speed'] = speed
+                break
 
 
 def downloads_page():
@@ -401,7 +457,10 @@ def downloads_page():
     if 'download_page_manager' not in st.session_state:
         st.session_state.download_page_manager = DownloadPageManager()
 
-    downloads_by_anime ={}
+    if st.session_state.downloads:
+        asyncio.create_task(st.session_state.download_page_manager.start_downloads())
+
+    downloads_by_anime = {}
     for download in st.session_state.downloads:
         anime_name = download['anime_name']
         if anime_name not in downloads_by_anime:
@@ -448,17 +507,6 @@ def downloads_page():
                             st.button("Pause", key=f"pause_{anime_name}_{download['episode']}")
                         with col3_2:
                             st.button("Cancel", key=f"cancel_{anime_name}_{download['episode']}")
-
-
-def save_folder_picker():
-    """Create a folder picker widget"""
-    default_path = setup["downloads"]
-    save_path = st.text_input("Download Location:", value=default_path)
-    if st.button("Browse..."):
-        # Note: Streamlit can't directly open a folder picker dialog
-        # This is a workaround to let users manually input the path
-        st.info("Please manually enter the folder path where you want to save the downloads.")
-    return save_path
 
 
 def batch_download_page():
@@ -681,7 +729,7 @@ async def download_link_async(session, link):
             return [backup_link[0], title]
 
 
-async def download_episodes(episodes: List[dict], anime_name: str, save_path: str):
+async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     """Downloads multiple episodes using the download manager"""
     if 'download_manager' not in st.session_state:
         st.session_state.download_manager = DownloadManager()
@@ -700,6 +748,7 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path: st
                 download_info = await download_link_async(download_manager.session, episode['url'])
                 download_url = download_info[0]
                 episode_title = download_info[1]
+                print(download_info)
 
                 # Create filename using the extracted title
                 filename = f"{episode_title}_episode_{episode['episode']}.mp4"
@@ -719,7 +768,7 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path: st
         # Since tasks are already running, we just need to wait for them to complete
         for task in download_tasks:
             while task.state not in [DownloadState.COMPLETED, DownloadState.ERROR, DownloadState.CANCELLED]:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
 
     except Exception as e:
         st.error(f"Download manager error: {str(e)}")
@@ -768,15 +817,10 @@ def parse_episode_selection(selections: str, max_episodes: int) -> List[int]:
 
 
 def single_download_page():
-    # st.title("Anime Search & Download")
-    # options = ["Single", "Batch"]
-    # st.radio("Choose type of download: ", options)
     st.title("Single Anime Download")
 
-    save_path = save_folder_picker()
-
     col1, col2 = st.columns(2)
-    anime_name = col1.text_input("Enter Anime name: ", placeholder="Search")
+    anime_name = col1.text_input("Enter Anime name: ", placeholder="Search").title()
     response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={anime_name}").text, "html.parser")
 
     try:
@@ -837,24 +881,24 @@ def single_download_page():
             col1, col2 = st.columns(2)
             with col1:
                 start = st.number_input("Start episode", min_value=1, max_value=len(episodes), value=1)
-                print(start)
             with col2:
                 end = st.number_input("End episode", min_value=start + 1, max_value=len(episodes), value=min(start + 1, len(episodes)))
-                print(end)
 
             if st.button("Download Range"):
-                if 'download_started' not in st.session_state:
+                if 'download_started' not in st.session_state or st.session_state.download_started is False:
                     st.session_state.download_started = True
                     selected_episodes = episodes[start-1:end]
                     for i in selected_episodes:
                         print(i)
                     save_path = os.path.join(download_folder, anime_name)
-                    print(save_path)
                     st.session_state.episodes_to_download = selected_episodes
-
+                    print(st.session_state.episodes_to_download)
                     try:
                         # Use asyncio.create_task instead of asyncio.run
                         # Create new event loop and run the download
+
+                        st.write("### Downloads")
+
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
 
@@ -867,12 +911,10 @@ def single_download_page():
                             )
                         )
                         loop.close()
-                        st.switch_page("Downloads")
                     except Exception as e:
                         st.session_state.download_started = False
                         st.error(f"Error starting download: {str(e)}")
                         raise e  # Re-raise for debugging
-
 
         else:
             episode_input = st.text_input(
@@ -887,23 +929,29 @@ def single_download_page():
                     st.session_state.episodes_to_download = selected_episodes
                     save_path = os.path.join(download_folder, anime_name)
 
-                    # print(st.session_state.selected_anime[0], selected_episodes)
-
                     # Create a new section for downloads
                     st.write("### Downloads")
 
-                    # Run the download process
-                    asyncio.create_task(
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    # Run the download in the event loop
+                    loop.run_until_complete(
                         download_episodes(
                             selected_episodes,
                             st.session_state.selected_anime[0],
                             save_path
                         )
                     )
-                    st.switch_page("Downloads")
+                    loop.close()
+                    st.session_state.download_started = False
 
                 except ValueError:
                     st.error("Invalid episode selection. Please try again.")
+                except Exception as e:
+                        st.session_state.download_started = False
+                        st.error(f"Error starting download: {str(e)}")
+                        raise e  # Re-raise for debugging
 
         # Add a back button
         if st.button("Back to Search"):
@@ -913,15 +961,18 @@ def single_download_page():
 
 def main():
     st.sidebar.title("Anime Downloader")
-    page = st.sidebar.radio("Navigation", ["Search", "Batch", "Downloads"])
+    page = st.sidebar.radio("Navigation", ["Single", "Batch","Settings"])
 
     print(st.session_state)
 
-    if page == "Search":
+    if page == "Single":
         single_download_page()
     elif page == "Batch":
         batch_download_page()
+    # elif page == "Settings":
+    #     settings_page()
     else:
         downloads_page()
+
 
 main()
