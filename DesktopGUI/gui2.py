@@ -70,7 +70,7 @@ class Ui_MainWindow(object):
         self.SearchInput.setClearButtonEnabled(True)
         self.SearchInput.setObjectName("SearchInput")
         self.listWidget = QtWidgets.QListWidget(self.centralwidget)
-        self.listWidget.setGeometry(QtCore.QRect(10, 290, 371, 321))
+        self.listWidget.setGeometry(QtCore.QRect(10, 290, 371, 301))
         self.listWidget.setObjectName("listWidget")
         self.SearchLabel_2 = QtWidgets.QLabel(self.centralwidget)
         self.SearchLabel_2.setGeometry(QtCore.QRect(10, 260, 221, 41))
@@ -138,19 +138,20 @@ class Ui_MainWindow(object):
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
-        self.searchButton.clicked.connect(self.perform_search)
+        self.searchButton.clicked.connect( self.perform_search)
 
-    def perform_search(self):
+
+    async def perform_search(self):
         print("Search")
 
-        def update_links(links):
+        async def update_list_widget(links):
             """Clear the list and add new links."""
             self.listWidget.clear()
             for link in links:
                 item = QListWidgetItem(link)
                 self.listWidget.addItem(item)
 
-        def get_names(response):
+        async def get_names(response):
             titles = response.find("ul", {"class": "items"}).find_all("li")
             names = []
             for i in titles:
@@ -159,7 +160,7 @@ class Ui_MainWindow(object):
                 names.append([name, url])
             return names
 
-        def search():
+        async def search():
             """
             Search for anime and return download links for selected episodes.
             Returns:
@@ -185,7 +186,24 @@ class Ui_MainWindow(object):
                 self.warningLabel.setText("No results found. Try again.")
                 self.warningLabel.setVisible(True)
 
-            update_links(animes)
+
+            self.listWidget.clear()
+            for anime_link in animes:
+                item = QListWidgetItem(anime_link[0])
+                self.listWidget.addItem(item)
+
+                await resize_list_widget()
+
+        async def resize_list_widget():
+            item_count = self.listWidget.count()
+            item_height = self.listWidget.sizeHintForRow(0)
+
+            max_display_items = 15
+            visible_items = min(item_count, max_display_items)
+            total_height = visible_items * item_height + 10 # 10 px padding
+
+            self.listWidget.setFixedHeight(total_height)
+
 
 
             # while True:
@@ -199,7 +217,7 @@ class Ui_MainWindow(object):
             #
             # return create_links(animes[selected_anime])
 
-        search()
+        await search()
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate

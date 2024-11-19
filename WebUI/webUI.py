@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 
 
-f = open("setup.json", "r")
+f = open("../DesktopGUI/setup.json", "r")
 setup = json.load(f)
 f.close()
 base_url = setup["gogoanime_main"]
@@ -1003,7 +1003,7 @@ def single_download_page():
 
 def save_setup(settings):
     """Save settings to setup.json"""
-    with open("setup.json", "w") as f:
+    with open("../DesktopGUI/setup.json", "w") as f:
         json.dump(settings, f, indent=4)
 
 
