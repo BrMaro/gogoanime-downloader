@@ -1,4 +1,3 @@
-import pprint
 import streamlit as st
 import json
 from bs4 import BeautifulSoup
@@ -8,7 +7,7 @@ import os
 import aiohttp
 import aiofiles
 from dataclasses import dataclass,asdict
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional
 from enum import Enum
 from datetime import datetime
 import re
@@ -1037,6 +1036,11 @@ def settings_page():
         index=resolutions.index('360p')
     )
     st.session_state.default_resolution = selected_resolution
+    if selected_resolution != setup.get("default_resolution"):
+        setup["default_resolution"] = selected_resolution
+        save_setup(setup)
+        st.success("Default resolution updated successfully!")
+
     st.info(f"Selected resolution: {selected_resolution}")
 
     if st.button("Reset to Default Settings"):
