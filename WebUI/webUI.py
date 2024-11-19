@@ -675,9 +675,8 @@ def batch_download_page():
                 if 'download_started' not in st.session_state:
                     st.session_state.download_started = True
 
-                    # Initialize download manager if needed
                     if 'download_manager' not in st.session_state:
-                        st.session_state.download_manager = DownloadManager()
+                        st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
 
                     st.write("### Download Progress")
 
@@ -687,7 +686,10 @@ def batch_download_page():
 
                         # Create episode list in the format expected by download_episodes
                         episode_list = [
-                            {"episode": str(ep), "url": f"{base_url}{item.url}/ep-{ep}"}
+                            {
+                                "episode": str(ep),
+                                "url": f"{base_url}{item.url.replace('/category', '')}-episode-{ep}"
+                            }
                             for ep in item.episodes
                         ]
 
@@ -777,7 +779,7 @@ async def download_link_async(session, link):
 async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     """Downloads multiple episodes using the download manager"""
     if 'download_manager' not in st.session_state:
-        st.session_state.download_manager = DownloadManager()
+        st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
 
     download_manager = st.session_state.download_manager
 
@@ -793,7 +795,6 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path):
                 download_info = await download_link_async(download_manager.session, episode['url'])
                 download_url = download_info[0]
                 episode_title = download_info[1]
-                print(download_info)
 
                 # Create filename using the extracted title
                 filename = f"{episode_title}_episode_{episode['episode']}.mp4"
@@ -933,16 +934,13 @@ def single_download_page():
                 if 'download_started' not in st.session_state or st.session_state.download_started is False:
                     st.session_state.download_started = True
                     selected_episodes = episodes[start-1:end]
-                    for i in selected_episodes:
-                        print(i)
                     save_path = os.path.join(download_folder, anime_name)
                     st.session_state.episodes_to_download = selected_episodes
-                    print(st.session_state.episodes_to_download)
-                    try:
-                        # Use asyncio.create_task instead of asyncio.run
-                        # Create new event loop and run the download
 
+                    try:
                         st.write("### Downloads")
+                        for ep in selected_episodes:
+                            print(ep)
 
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
@@ -1106,9 +1104,9 @@ def settings_page():
             if reset_changes:
                 st.write("Changes made:")
                 for change in reset_changes:
-                    st.write(f"• {change}")
+                    st.write(f"  • {change}")
 
-            time.sleep()
+            time.sleep(3)
             st.rerun()
 
 
