@@ -683,7 +683,7 @@ def batch_download_page():
 
                     for item in st.session_state.batch_manager.download_list:
                         st.write(f"#### {item.name}")
-                        download_path = os.path.join(save_path, item.name)
+                        download_path = os.path.join(download_folder, item.name)
 
                         # Create episode list in the format expected by download_episodes
                         episode_list = [
@@ -692,19 +692,19 @@ def batch_download_page():
                         ]
 
                         try:
-                            # Use asyncio.create_task instead of asyncio.run
-                            asyncio.create_task(
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+
+                            loop.run_until_complete(
                                 download_episodes(
                                     episode_list,
                                     item.name,
                                     download_path
                                 )
                             )
+                            loop.close()
                         except Exception as e:
                             st.error(f"Error starting download for {item.name}: {str(e)}")
-
-                    # Redirect to downloads page
-                    st.switch_page("Downloads")
 
 
 def clean_filename(filename):
@@ -947,7 +947,6 @@ def single_download_page():
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
 
-                        # Run the download in the event loop
                         loop.run_until_complete(
                             download_episodes(
                                 selected_episodes,
@@ -959,7 +958,7 @@ def single_download_page():
                     except Exception as e:
                         st.session_state.download_started = False
                         st.error(f"Error starting download: {str(e)}")
-                        raise e  # Re-raise for debugging
+                        raise e
 
         else:
             episode_input = st.text_input(
@@ -974,7 +973,6 @@ def single_download_page():
                     st.session_state.episodes_to_download = selected_episodes
                     save_path = os.path.join(download_folder, anime_name)
 
-                    # Create a new section for downloads
                     st.write("### Downloads")
 
                     loop = asyncio.new_event_loop()
@@ -994,14 +992,61 @@ def single_download_page():
                 except ValueError:
                     st.error("Invalid episode selection. Please try again.")
                 except Exception as e:
-                        st.session_state.download_started = False
-                        st.error(f"Error starting download: {str(e)}")
-                        raise e  # Re-raise for debugging
+                    st.session_state.download_started = False
+                    st.error(f"Error starting download: {str(e)}")
+                    raise e
 
-        # Add a back button
         if st.button("Back to Search"):
             st.session_state.page = 'search'
             st.rerun()
+
+
+def save_setup(settings):
+    """Save settings to setup.json"""
+    with open("setup.json", "w") as f:
+        json.dump(settings, f, indent=4)
+
+
+def settings_page():
+    st.title("Settings")
+    st.header("Download Location")
+    default_path = setup["downloads"]
+    save_path = st.text_input("Download Location:", value=default_path)
+
+    if st.button("Browse..."):
+        # Note: Streamlit can't directly open a folder picker dialog
+        # This is a workaround to let users manually input the path
+        st.info("Please manually enter the folder path where you want to save the downloads.")
+
+    if save_path != setup["downloads"]:
+        if os.path.exists(os.path.dirname(save_path)):
+            setup["downloads"] = save_path
+            save_setup(setup)
+            st.success("Download location updated successfully!")
+        else:
+            st.error("Invalid path. Please enter a valid directory path.")
+
+    st.info(f"Current Path: {save_path}")
+
+    st.header("Resolution Settings")
+
+    resolutions = ['360p', '480p', '720p', '1080p']
+    selected_resolution = st.radio(
+        "Select Default Download Resolution:",
+        resolutions,
+        index=resolutions.index('360p')
+    )
+    st.session_state.default_resolution = selected_resolution
+    st.info(f"Selected resolution: {selected_resolution}")
+
+    if st.button("Reset to Default Settings"):
+        default_settings = {
+            "downloads": os.path.join(os.path.expanduser("~"), "Downloads"),
+            "default_resolution": "360p"
+        }
+        save_setup(default_settings)
+        st.success("Settings reset to default! Please refresh the page.")
+        st.rerun()
 
 
 def main():
