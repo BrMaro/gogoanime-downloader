@@ -12,6 +12,7 @@ from enum import Enum
 from datetime import datetime
 import re
 from pathlib import Path
+import time
 
 
 f = open("../DesktopGUI/setup.json", "r")
@@ -1008,49 +1009,107 @@ def save_setup(settings):
 
 def settings_page():
     st.title("Settings")
+
+    # Create a copy of settings to track changes
+    temp_settings = setup.copy()
+    changes_made = []  # List to track what changes were made
+
+    # Download Location Section
     st.header("Download Location")
     default_path = setup["downloads"]
     save_path = st.text_input("Download Location:", value=default_path)
 
     if st.button("Browse..."):
-        # Note: Streamlit can't directly open a folder picker dialog
-        # This is a workaround to let users manually input the path
         st.info("Please manually enter the folder path where you want to save the downloads.")
 
-    if save_path != setup["downloads"]:
-        if os.path.exists(os.path.dirname(save_path)):
-            setup["downloads"] = save_path
-            save_setup(setup)
-            st.success("Download location updated successfully!")
-        else:
-            st.error("Invalid path. Please enter a valid directory path.")
+    if not os.path.exists(os.path.dirname(save_path)):
+        st.error("Invalid path. Please enter a valid directory path.")
+    else:
+        if save_path != setup["downloads"]:
+            changes_made.append(f"Download location changed from '{setup['downloads']}' to '{save_path}'")
+        temp_settings["downloads"] = save_path
 
-    st.info(f"Current Path: {save_path}")
 
+    # Resolution Settings
     st.header("Resolution Settings")
 
     resolutions = ['360p', '480p', '720p', '1080p']
     selected_resolution = st.radio(
         "Select Default Download Resolution:",
         resolutions,
-        index=resolutions.index('360p')
+        index=resolutions.index(setup.get("default_resolution", '360p'))
     )
-    st.session_state.default_resolution = selected_resolution
     if selected_resolution != setup.get("default_resolution"):
-        setup["default_resolution"] = selected_resolution
-        save_setup(setup)
-        st.success("Default resolution updated successfully!")
+        changes_made.append(
+            f"Default resolution changed from '{setup.get('default_resolution')}' to '{selected_resolution}'")
+    temp_settings["default_resolution"] = selected_resolution
 
-    st.info(f"Selected resolution: {selected_resolution}")
+    # Concurrent Downloads Settings
+    st.header("Download Settings")
+    concurrent_downloads = st.number_input(
+        "Maximum Concurrent Downloads:",
+        min_value=1,
+        max_value=10,
+        value=setup.get("max_concurrent_downloads", 3),
+        help="Set the maximum number of videos that can be downloaded simultaneously"
+    )
+    if concurrent_downloads != setup.get("max_concurrent_downloads"):
+        changes_made.append(
+            f"Maximum concurrent downloads changed from {setup.get('max_concurrent_downloads', 3)} to {concurrent_downloads}")
+    temp_settings["max_concurrent_downloads"] = int(concurrent_downloads)
 
-    if st.button("Reset to Default Settings"):
-        default_settings = {
-            "downloads": os.path.join(os.path.expanduser("~"), "Downloads"),
-            "default_resolution": "360p"
-        }
-        save_setup(default_settings)
-        st.success("Settings reset to default! Please refresh the page.")
-        st.rerun()
+    # Save Button and Reset Button in columns
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Save Changes"):
+            if not changes_made:
+                st.info("No changes to save.")
+            else:
+                # Validate all settings before saving
+                if os.path.exists(os.path.dirname(temp_settings["downloads"])):
+                    save_setup(temp_settings)
+
+                    # Display success message with changes
+                    st.success("Settings saved successfully!")
+                    st.write("Changes made:")
+                    for change in changes_made:
+                        st.write(f"• {change}")
+
+                    # Add a delay before rerun to allow user to see the changes
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error("Cannot save: Invalid download path")
+
+    with col2:
+        if st.button("Reset to Default Settings"):
+            default_settings = {
+                "downloads": os.path.join(os.path.expanduser("~"), "Downloads"),
+                "default_resolution": "360p",
+                "max_concurrent_downloads": 3
+            }
+
+            # Track what will be reset
+            reset_changes = []
+            if default_settings["downloads"] != setup["downloads"]:
+                reset_changes.append(f"Download location reset to '{default_settings['downloads']}'")
+            if default_settings["default_resolution"] != setup.get("default_resolution"):
+                reset_changes.append(f"Default resolution reset to '{default_settings['default_resolution']}'")
+            if default_settings["max_concurrent_downloads"] != setup.get("max_concurrent_downloads"):
+                reset_changes.append(
+                    f"Maximum concurrent downloads reset to {default_settings['max_concurrent_downloads']}")
+
+            save_setup(default_settings)
+
+            st.success("Settings reset to default!")
+            if reset_changes:
+                st.write("Changes made:")
+                for change in reset_changes:
+                    st.write(f"• {change}")
+
+            time.sleep()
+            st.rerun()
 
 
 def main():
