@@ -646,6 +646,7 @@ def batch_download_page():
                         else:
                             added = st.session_state.batch_manager.merge_list(selected_list)
                             st.success(f"Merged successfully! Added {added} new items.")
+                        time.sleep(2)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error loading list: {str(e)}")
