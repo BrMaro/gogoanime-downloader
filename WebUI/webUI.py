@@ -13,6 +13,8 @@ from datetime import datetime
 import re
 from pathlib import Path
 import time
+import psutil
+import math
 
 
 with open("../WebUI/setup.json", "r") as f:
@@ -1043,23 +1045,113 @@ def settings_page():
         changes_made.append(f"Default resolution changed from '{setup.get('default_resolution')}' to '{selected_resolution}'")
     temp_settings["download_quality"] = selected_resolution
 
+
     # Concurrent Downloads Settings
     st.header("Download Settings")
-    concurrent_downloads = st.number_input(
-        "Maximum Concurrent Downloads:",
-        min_value=1,
-        max_value=10,
-        value=setup.get("max_threads", 3),
-        help="Set the maximum number of videos that can be downloaded simultaneously"
-    )
 
-    if concurrent_downloads != setup.get("max_threads"):
-        changes_made.append(
-            f"Maximum concurrent downloads changed from {setup.get('max_concurrent_downloads', 3)} to {concurrent_downloads}")
-    temp_settings["max_threads"] = int(concurrent_downloads)
+    concurrent_downloads = st.empty()
+
+    # Function to create the number input
+    def create_number_input(value):
+        return concurrent_downloads.number_input(
+            "Maximum Concurrent Downloads:",
+            min_value=1,
+            max_value=10,
+            value=value,
+            help="Set the maximum number of videos that can be downloaded simultaneously"
+        )
+
+    # Initial number input
+    current_value = create_number_input(setup.get("max_threads", 3))
+
+    # Create status containers for optimization feedback
+    status_container = st.empty()
+    details_container = st.empty()
 
     # Save Button and Reset Button in columns
-    col1, col2, col3 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button("Optimize Max Threads", help="Finds the Optimum number of Concurrent Downloads"):
+            async def estimate_optimal_workers(
+                    test_url: str = "https://www.google.com",
+                    max_workers: int = 10,
+                    min_workers: int = 1,
+            ):
+                # Show testing status
+                status_container.info("🔄 Optimizing concurrent downloads... Please wait.")
+
+                # Get CPU info
+                cpu_count = os.cpu_count() or 4
+                details_container.write(f"CPU Cores detected: {cpu_count}")
+
+                # Get memory info
+                memory = psutil.virtual_memory()
+                available_memory_gb = memory.available / (1024 * 1024 * 1024)
+                details_container.write(f"Available memory: {available_memory_gb:.2f} GB")
+
+                base_workers = cpu_count * 2
+                memory_based_workers = int(available_memory_gb * 5)
+
+                details_container.write(f"Base worker estimate (CPU-based): {base_workers}")
+                details_container.write(f"Memory-based worker estimate: {memory_based_workers}")
+
+                try:
+                    details_container.write("Testing network conditions...")
+                    async with aiohttp.ClientSession() as session:
+                        start_time = asyncio.get_event_loop().time()
+                        async with session.get(test_url) as response:
+                            await response.read()
+                        latency = asyncio.get_event_loop().time() - start_time
+
+                        details_container.write(f"Network latency: {latency:.3f} seconds")
+                        latency_factor = 1 / (1 + math.exp(latency - 0.5))
+                        network_based_workers = int(max_workers * latency_factor)
+                        details_container.write(f"Network-based worker estimate: {network_based_workers}")
+
+                except Exception as e:
+                    details_container.write("⚠️ Network test failed, using CPU-based estimate")
+                    network_based_workers = base_workers
+
+                optimal_workers = min(
+                    base_workers,
+                    memory_based_workers,
+                    network_based_workers,
+                    max_workers
+                )
+
+                optimal_workers = max(optimal_workers, min_workers)
+                return optimal_workers
+
+            # Run the optimization
+            try:
+                # Create and run event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                optimal_value = loop.run_until_complete(estimate_optimal_workers())
+                loop.close()
+
+                # Update the number input with the optimal value
+                if optimal_value != current_value:
+                    changes_made.append(
+                        f"Maximum concurrent downloads optimized from {current_value} to {optimal_value}")
+                    temp_settings["max_threads"] = int(optimal_value)
+
+                    # Update the number input
+                    current_value = create_number_input(optimal_value)
+
+                status_container.success(f"✅ Optimization complete! Recommended concurrent downloads: {optimal_value}")
+
+            except Exception as e:
+                status_container.error(f"❌ Error during optimization: {str(e)}")
+                details_container.empty()
+
+    # Handle manual changes to the number input
+    if current_value != setup.get("max_threads"):
+        changes_made.append(
+            f"Maximum concurrent downloads changed from {setup.get('max_threads', 3)} to {current_value}")
+        temp_settings["max_threads"] = int(current_value)
+
 
 
     with col2:
