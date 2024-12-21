@@ -7,12 +7,14 @@ from bs4 import BeautifulSoup
 import re
 import threading
 import queue
+from pathlib import Path
 
-f = open("../DesktopGUI/setup.json", "r")
+f = open("../CommandLineUI/setup.json", "r")
 setup = json.load(f)
 f.close()
 base_url = setup["gogoanime_main"]
-download_folder = r"G:/Anime Downloads"
+download_folder = setup["downloads"]
+print(download_folder)
 captcha_v3 = setup["captcha_v3"]
 download_quality = int(setup["download_quality"])
 max_threads = setup["max_threads"]
@@ -42,29 +44,45 @@ def threaded_download(task_queue, folder):
         item = task_queue.get()
         if item is None:
             break
-        episode = item["episode"]
-        download = download_link(item["url"])
-        url = download[0]
-        title = download[1]
-        file_path = f"{download_folder}/{folder}/{title}.mp4"
-        if os.path.exists(file_path):
-            print("File already exists, going to override current data.")
-            os.remove(file_path)
-        else:
-            open(file_path, "x").close()
+
+        try:
+            episode = item["episode"]
+            download = download_link(item["url"])
+            url = download[0]
+            title = download[1]
+            file_path = Path(folder) / title
+            file_path = file_path.with_suffix('.mp4')
+
+            # Create all parent directories if they don't exist
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            if file_path.exists():
+                print(f"File already exists, going to override current data: {file_path}")
+                file_path.unlink()
+
+            file_path.touch()
             print(f"Created new file: {title}.mp4")
-        r = requests.get(url, stream=True)
-        print(f"{Fore.WHITE}Started downloading {title}, episode {episode} to {file_path}.{Style.RESET_ALL}")
-        with open(file_path, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=512 * 512):
-                if chunk:
-                    f.write(chunk)
-        if os.path.getsize(file_path) == 0:
-            print(f"{Fore.RED}Something went wrong while downloading {title}, retrying... {Style.RESET_ALL}")
-            task_queue.put(item)
-        else:
-            print(f"{Fore.GREEN}Finished downloading {title}, episode {episode} to {file_path}.{Style.RESET_ALL}")
-        task_queue.task_done()
+
+            r = requests.get(url, stream=True)
+            print(f"{Fore.WHITE}Started downloading {title}, episode {episode} to {file_path}.{Style.RESET_ALL}")
+
+            with open(file_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=512 * 512):
+                    if chunk:
+                        f.write(chunk)
+
+            if file_path.stat().st_size == 0:
+                print(f"{Fore.RED}Something went wrong while downloading {title}, retrying... {Style.RESET_ALL}")
+                task_queue.put(item)
+            else:
+                print(f"{Fore.GREEN}Finished downloading {title}, episode {episode} to {file_path}.{Style.RESET_ALL}")
+
+        except Exception as e:
+            print(f"{Fore.RED}Error downloading {item.get('url', 'unknown URL')}: {str(e)}{Style.RESET_ALL}")
+            task_queue.put(item)  # Retry the failed download
+
+        finally:
+            task_queue.task_done()
 
 
 def download_link(link):
