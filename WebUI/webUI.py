@@ -15,15 +15,16 @@ from pathlib import Path
 import time
 
 
-f = open("../DesktopGUI/setup.json", "r")
-setup = json.load(f)
-f.close()
+with open("../WebUI/setup.json", "r") as f:
+    setup = json.load(f)
+
 base_url = setup["gogoanime_main"]
 download_folder = setup["downloads"]
 captcha_v3 = setup["captcha_v3"]
 download_quality = int(setup["download_quality"])
 max_threads = setup["max_threads"]
 
+print(download_folder,download_quality)
 
 class DownloadState(Enum):
     QUEUED = "queued"
@@ -515,7 +516,7 @@ def batch_download_page():
 
     st.title("Batch Download Manager")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Add Anime","View Current List", "Manage List", "Start Download"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Add Anime", "View Current List", "Manage List", "Start Download"])
 
     with tab1:
         st.header("Add Anime to Batch")
@@ -684,7 +685,7 @@ def batch_download_page():
                     for item in st.session_state.batch_manager.download_list:
                         st.write(f"#### {item.name}")
                         download_path = os.path.join(download_folder, item.name)
-
+                        print(item.name)
                         # Create episode list in the format expected by download_episodes
                         episode_list = [
                             {
@@ -705,7 +706,6 @@ def batch_download_page():
                                     download_path
                                 )
                             )
-                            loop.close()
                         except Exception as e:
                             st.error(f"Error starting download for {item.name}: {str(e)}")
 
@@ -1002,7 +1002,7 @@ def single_download_page():
 
 def save_setup(settings):
     """Save settings to setup.json"""
-    with open("../DesktopGUI/setup.json", "w") as f:
+    with open("../WebUI/setup.json", "w") as f:
         json.dump(settings, f, indent=4)
 
 
@@ -1016,7 +1016,7 @@ def settings_page():
     # Download Location Section
     st.header("Download Location")
     default_path = setup["downloads"]
-    save_path = st.text_input("Download Location:", value=default_path)
+    save_path = st.text_input("Download Location:", value=default_path,help="Copy and Paste file path")
 
     if st.button("Browse..."):
         st.info("Please manually enter the folder path where you want to save the downloads.")
@@ -1032,16 +1032,16 @@ def settings_page():
     # Resolution Settings
     st.header("Resolution Settings")
 
-    resolutions = ['360p', '480p', '720p', '1080p']
+    resolutions = ['360', '480', '720', '1080']
     selected_resolution = st.radio(
         "Select Default Download Resolution:",
         resolutions,
-        index=resolutions.index(setup.get("default_resolution", '360p'))
+        index=resolutions.index(setup.get("download_quality", '360'))
     )
-    if selected_resolution != setup.get("default_resolution"):
-        changes_made.append(
-            f"Default resolution changed from '{setup.get('default_resolution')}' to '{selected_resolution}'")
-    temp_settings["default_resolution"] = selected_resolution
+
+    if selected_resolution != setup.get("download_quality"):
+        changes_made.append(f"Default resolution changed from '{setup.get('default_resolution')}' to '{selected_resolution}'")
+    temp_settings["download_quality"] = selected_resolution
 
     # Concurrent Downloads Settings
     st.header("Download Settings")
@@ -1049,18 +1049,20 @@ def settings_page():
         "Maximum Concurrent Downloads:",
         min_value=1,
         max_value=10,
-        value=setup.get("max_concurrent_downloads", 3),
+        value=setup.get("max_threads", 3),
         help="Set the maximum number of videos that can be downloaded simultaneously"
     )
-    if concurrent_downloads != setup.get("max_concurrent_downloads"):
+
+    if concurrent_downloads != setup.get("max_threads"):
         changes_made.append(
             f"Maximum concurrent downloads changed from {setup.get('max_concurrent_downloads', 3)} to {concurrent_downloads}")
-    temp_settings["max_concurrent_downloads"] = int(concurrent_downloads)
+    temp_settings["max_threads"] = int(concurrent_downloads)
 
     # Save Button and Reset Button in columns
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(2)
 
-    with col1:
+
+    with col2:
         if st.button("Save Changes"):
             if not changes_made:
                 st.info("No changes to save.")
@@ -1081,12 +1083,12 @@ def settings_page():
                 else:
                     st.error("Cannot save: Invalid download path")
 
-    with col2:
+    with col3:
         if st.button("Reset to Default Settings"):
             default_settings = {
                 "downloads": os.path.join(os.path.expanduser("~"), "Downloads"),
-                "default_resolution": "360p",
-                "max_concurrent_downloads": 3
+                "download_quality": "360p",
+                "max_threads": 3
             }
 
             # Track what will be reset
