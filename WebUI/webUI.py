@@ -686,7 +686,6 @@ def batch_download_page():
                     # Create a single event loop for all downloads
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    print(2)
 
                     try:
                         for item in st.session_state.batch_manager.download_list:
@@ -700,7 +699,6 @@ def batch_download_page():
                                 }
                                 for ep in item.episodes
                             ]
-                            print(3)
 
                             # Run download for this anime
                             loop.run_until_complete(
@@ -721,7 +719,6 @@ def batch_download_page():
                     finally:
                         loop.close()
                         st.session_state.download_started = False
-                    print(5)
 
 def clean_filename(filename):
     cleaned_filename = re.sub(r'[\\/*?:"<>|]', '§', filename)
