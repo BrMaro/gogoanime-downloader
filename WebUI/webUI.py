@@ -15,6 +15,7 @@ from pathlib import Path
 import time
 import psutil
 import math
+from pathlib import Path
 
 
 with open("../WebUI/setup.json", "r") as f:
@@ -294,9 +295,25 @@ class BatchManager:
 
         # Create backup if file exists
         if save_path.exists():
-            backup_name = f"{save_path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            backup_path = self.save_directory / backup_name
-            save_path.rename(backup_path)
+            col1, col2 = st.columns(2)
+
+            with st.warning(f"File '{filename} already exists!"):
+                replace = col1.button("Replace existing file")
+                rename = col2.button("Save with new name")
+
+                if replace:
+                    # Create backup before replacing
+                    backup_name = f"{save_path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    backup_path = self.save_directory / backup_name
+                    save_path.rename(backup_path)
+                    return save_path
+
+                elif rename:
+                    # Generate new filename with timestamp
+                    new_name = f"{save_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    save_path = self.save_directory / new_name
+                    st.success(f"File will be saved as: {new_name}")
+                    return save_path
 
         data = {
             "version": "1.0",
@@ -309,8 +326,6 @@ class BatchManager:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             return save_path
         except Exception as e:
-            if backup_path.exists():
-                backup_path.rename(save_path)  # Restore backup if save fails
             raise IOError(f"Failed to save batch list: {str(e)}")
 
     def load_list(self, filename: Path) -> bool:
@@ -342,6 +357,13 @@ class BatchManager:
             raise ValueError("Invalid JSON format in batch list file")
         except Exception as e:
             raise IOError(f"Failed to load batch list: {str(e)}")
+
+    def delete_list(self, filename: Path) -> bool:
+        try:
+            Path(filename).unlink()
+            return True
+        except FileNotFoundError:
+            return False
 
     def merge_list(self, filename: Path) -> int:
         """
@@ -640,7 +662,8 @@ def batch_download_page():
             if saved_lists:
                 selected_list = st.selectbox("Load saved list:", saved_lists)
                 load_method = st.radio("Load method:", ["Replace", "Merge"])
-                if st.button("Load List"):
+                col1, col2 = st.columns(2)
+                if col1.button("Load List"):
                     try:
                         if load_method == "Replace":
                             st.session_state.batch_manager.load_list(selected_list)
@@ -652,6 +675,9 @@ def batch_download_page():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error loading list: {str(e)}")
+                if col2.button("Delete list"):
+                    st.session_state.batch_manager.delete_list(selected_list)
+                    st.error("List Deleted")
             else:
                 st.info("No saved lists found")
 
@@ -719,6 +745,7 @@ def batch_download_page():
                     finally:
                         loop.close()
                         st.session_state.download_started = False
+
 
 def clean_filename(filename):
     cleaned_filename = re.sub(r'[\\/*?:"<>|]', '§', filename)
