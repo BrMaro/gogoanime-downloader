@@ -26,7 +26,6 @@ captcha_v3 = setup["captcha_v3"]
 download_quality = int(setup["download_quality"])
 max_threads = setup["max_threads"]
 
-print(download_folder,download_quality)
 
 class DownloadState(Enum):
     QUEUED = "queued"
@@ -681,26 +680,29 @@ def batch_download_page():
 
                     if 'download_manager' not in st.session_state:
                         st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
-
+    
                     st.write("### Download Progress")
+                    print(1)
+                    # Create a single event loop for all downloads
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    print(2)
 
-                    for item in st.session_state.batch_manager.download_list:
-                        st.write(f"#### {item.name}")
-                        download_path = os.path.join(download_folder, item.name)
-                        print(item.name)
-                        # Create episode list in the format expected by download_episodes
-                        episode_list = [
-                            {
-                                "episode": str(ep),
-                                "url": f"{base_url}{item.url.replace('/category', '')}-episode-{ep}"
-                            }
-                            for ep in item.episodes
-                        ]
+                    try:
+                        for item in st.session_state.batch_manager.download_list:
+                            st.write(f"#### {item.name}")
+                            download_path = os.path.join(download_folder, item.name)
+                            
+                            episode_list = [
+                                {
+                                    "episode": str(ep),
+                                    "url": f"{base_url}{item.url.replace('/category', '')}-episode-{ep}"
+                                }
+                                for ep in item.episodes
+                            ]
+                            print(3)
 
-                        try:
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-
+                            # Run download for this anime
                             loop.run_until_complete(
                                 download_episodes(
                                     episode_list,
@@ -708,41 +710,22 @@ def batch_download_page():
                                     download_path
                                 )
                             )
-                        except Exception as e:
-                            st.error(f"Error starting download for {item.name}: {str(e)}")
+                            print(4)
+                            # Reset download manager for next anime
+                            loop.run_until_complete(st.session_state.download_manager.stop())
+                            st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
+                            loop.run_until_complete(st.session_state.download_manager.start())
 
+                    except Exception as e:
+                        st.error(f"Error in batch download: {str(e)}")
+                    finally:
+                        loop.close()
+                        st.session_state.download_started = False
+                    print(5)
 
 def clean_filename(filename):
     cleaned_filename = re.sub(r'[\\/*?:"<>|]', '§', filename)
     return cleaned_filename
-
-
-def download_link(link):
-    soup = BeautifulSoup(requests.get(link).text, "html.parser")
-    base_download_url = BeautifulSoup(str(soup.find("li", {"class": "dowloads"})), "html.parser").a.get("href")  #typo in the webcode?
-    id = base_download_url[base_download_url.find("id=") + 3:base_download_url.find("&typesub")]
-    base_download_url = base_download_url[:base_download_url.find("id=")]
-    title = BeautifulSoup(requests.post(f"{base_download_url}&id={id}").text, "html.parser")
-    title = clean_filename(title.find("span", {"id": "title"}).text)
-    response = requests.post(f"{base_download_url}&id={id}&captcha_v3={captcha_v3}")  #will this captcha work for long?
-    soup = BeautifulSoup(response.text, "html.parser")
-    backup_link = []
-    for i in soup.find_all("div", {"class": "dowload"}):
-        if str(BeautifulSoup(str(i), "html.parser").a).__contains__('download=""'):
-            link = (BeautifulSoup(str(i), "html.parser").a.get("href"))
-            quality = BeautifulSoup(str(i), "html.parser").a.string.replace(" ", "").replace("Download", "")
-            try:
-                quality = int(quality[2:quality.find("P")])
-            except ValueError:
-                print("Failed to parse quality information. Using default quality.")
-                quality = 0
-            if quality == download_quality:
-                print(f"Downloading in {quality}p")
-                return [link, title]
-            backup_link = [link, quality]
-    print(f"Downloading in {backup_link[1]}p")
-    return [backup_link[0],
-            title]  #if the prefered download quality is not available the highest quality will automaticly be chosen
 
 
 async def download_link_async(session, link):
@@ -781,16 +764,17 @@ async def download_link_async(session, link):
 
 async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     """Downloads multiple episodes using the download manager"""
+    print("a")
     if 'download_manager' not in st.session_state:
         st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
-
+    print("b")
     download_manager = st.session_state.download_manager
-
+    print("c")
     try:
         # Start the download manager if it's not running
         if not hasattr(download_manager, 'session') or download_manager.session is None:
             await download_manager.start()
-
+        print("d")
         download_tasks = []
         for episode in episodes:
             try:
@@ -813,18 +797,19 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path):
             except Exception as e:
                 st.error(f"Error processing episode {episode['episode']}: {str(e)}")
                 continue
-
+        print("e")
         # Since tasks are already running, we just need to wait for them to complete
         for task in download_tasks:
             while task.state not in [DownloadState.COMPLETED, DownloadState.ERROR, DownloadState.CANCELLED]:
                 await asyncio.sleep(0.5)
-
+        print("f")
     except Exception as e:
         st.error(f"Download manager error: {str(e)}")
         raise e
     finally:
         # Always try to stop the download manager
         try:
+            print("g")
             await download_manager.stop()
         except Exception as e:
             st.error(f"Error stopping download manager: {str(e)}")
@@ -942,8 +927,6 @@ def single_download_page():
 
                     try:
                         st.write("### Downloads")
-                        for ep in selected_episodes:
-                            print(ep)
 
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
@@ -1151,8 +1134,6 @@ def settings_page():
         changes_made.append(
             f"Maximum concurrent downloads changed from {setup.get('max_threads', 3)} to {current_value}")
         temp_settings["max_threads"] = int(current_value)
-
-
 
     with col2:
         if st.button("Save Changes"):
