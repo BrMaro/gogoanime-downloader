@@ -298,22 +298,18 @@ class BatchManager:
             col1, col2 = st.columns(2)
 
             with st.warning(f"File '{filename} already exists!"):
-                replace = col1.button("Replace existing file")
-                rename = col2.button("Save with new name")
-
-                if replace:
-                    # Create backup before replacing
-                    backup_name = f"{save_path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    backup_path = self.save_directory / backup_name
-                    save_path.rename(backup_path)
-                    return save_path
-
-                elif rename:
-                    # Generate new filename with timestamp
-                    new_name = f"{save_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    save_path = self.save_directory / new_name
-                    st.success(f"File will be saved as: {new_name}")
-                    return save_path
+                if col1.button("Replace Existing File"):
+                    try:
+                        # Create backup before replacing
+                        backup_name = f"{save_path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                        backup_path = self.save_directory / backup_name
+                        save_path.rename(backup_path)
+                        st.success(f"Backup created: {backup_name}")
+                        print(f"replacing with {backup_name}")
+                    except Exception as e:
+                        raise IOError(f"Failed to create backup: {str(e)}")
+                else:
+                    return None  # User didn't confirm replacement
 
         data = {
             "version": "1.0",
@@ -649,11 +645,12 @@ def batch_download_page():
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            save_name = st.text_input("Save list as:", value="batch_list.json")
+            save_name = st.text_input("Save list as:", placeholder="batch_list.json")
             if st.button("Save List"):
                 try:
                     saved_path = st.session_state.batch_manager.save_list(save_name)
-                    st.success(f"List saved as {saved_path.name}")
+                    if saved_path is not None:
+                        st.success(f"List saved as {saved_path.name}")
                 except Exception as e:
                     st.error(f"Error saving list: {str(e)}")
 
@@ -677,6 +674,7 @@ def batch_download_page():
                         st.error(f"Error loading list: {str(e)}")
                 if col2.button("Delete list"):
                     st.session_state.batch_manager.delete_list(selected_list)
+                    time.sleep(2)
                     st.error("List Deleted")
             else:
                 st.info("No saved lists found")
@@ -1213,8 +1211,6 @@ def settings_page():
 def main():
     st.sidebar.title("Anime Downloader")
     page = st.sidebar.radio("Navigation", ["Single", "Batch","Settings"])
-
-    print(st.session_state)
 
     if page == "Single":
         single_download_page()
