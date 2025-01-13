@@ -38,7 +38,9 @@ venv.bak/
 Thumbs.db
 
 # Project specific
-**/setup.json
+/CommandLineUI/setup.json
+/DesktopGUI/setup.json
+/WebUI/setup.json
 **/downloads/
 **/batch_lists/
 *.mp4
