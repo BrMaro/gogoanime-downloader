@@ -95,7 +95,7 @@ class DownloadTask:
 
             # Update the download page manager
             if 'download_page_manager' in st.session_state:
-                st.session_state.download_page_manager.update_download_progress(
+                st.session_state['download_page_manager'].update_download_progress(
                     url=self.url,
                     status='downloading' if self.state == DownloadState.DOWNLOADING else str(self.state.value),
                     progress=self.progress.percentage,
@@ -455,15 +455,15 @@ class BatchManager:
 class DownloadPageManager:
     def __init__(self):
         if 'downloads' not in st.session_state:
-            st.session_state.downloads = []
+            st.session_state['downloads'] = []
         if 'download_manager' not in st.session_state:
-            st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
+            st.session_state['download_manager'] = DownloadManager(max_concurrent=max_threads)
         if 'active_downloads' not in st.session_state:
-            st.session_state.active_downloads = set()
+            st.session_state['active_downloads'] = set()
 
     async def start_downloads(self):
         """Process any queued downloads that aren't already being processed"""
-        download_manager = st.session_state.download_manager
+        download_manager = st.session_state['download_manager']
 
         # Start download manager if needed
         if not hasattr(download_manager, 'session') or download_manager.session is None:
@@ -471,7 +471,7 @@ class DownloadPageManager:
 
         downloads_by_anime = {}
         for download in self.downloads:
-            if download['status'] == 'queued' and download['url'] not in st.session_state.active_downloads:
+            if download['status'] == 'queued' and download['url'] not in st.session_state['active_downloads']:
                 anime_name = download['anime-name']
                 if anime_name not in downloads_by_anime:
                     downloads_by_anime[anime_name]=[]
@@ -485,7 +485,7 @@ class DownloadPageManager:
                 } for download in anime_downloads]
 
                 for download in anime_downloads:
-                    st.session_state.active_downloads.add(download['url'])
+                    st.session_state['active_downloads'].add(download['url'])
 
                 # Start the download process
                 asyncio.create_task(self.process_anime_downloads(
@@ -506,7 +506,7 @@ class DownloadPageManager:
         finally:
             # Remove from active downloads
             for episode in episodes:
-                st.session_state.active_downloads.discard(episode['url'])
+                st.session_state['active_downloads'].discard(episode['url'])
 
     def update_download_progress(self, url: str, status: str, progress: float = 0,
                                  downloaded_bytes: int = 0, total_bytes: int = 0,
@@ -526,13 +526,13 @@ def downloads_page():
     st.title("Downloads")
 
     if 'download_page_manager' not in st.session_state:
-        st.session_state.download_page_manager = DownloadPageManager()
+        st.session_state['download_page_manager'] = DownloadPageManager()
 
-    if st.session_state.downloads:
-        asyncio.create_task(st.session_state.download_page_manager.start_downloads())
+    if st.session_state['downloads']:
+        asyncio.create_task(st.session_state['download_page_manager'].start_downloads())
 
     downloads_by_anime = {}
-    for download in st.session_state.downloads:
+    for download in st.session_state['downloads']:
         anime_name = download['anime_name']
         if anime_name not in downloads_by_anime:
             downloads_by_anime[anime_name]=[]
@@ -580,9 +580,10 @@ def downloads_page():
                             st.button("Cancel", key=f"cancel_{anime_name}_{download['episode']}")
 
 
+
 def batch_download_page():
     if 'batch_manager' not in st.session_state:
-        st.session_state.batch_manager = BatchManager()
+        st.session_state['batch_manager'] = BatchManager()
 
     st.title("Batch Download Manager")
 
@@ -630,7 +631,7 @@ def batch_download_page():
                                     episodes=selected_episodes,
                                     total_episodes=total_episodes
                                 )
-                                st.session_state.batch_manager.add_item(new_item)
+                                st.session_state['batch_manager'].add_item(new_item)
                                 st.success(f"Added {selected_anime} to batch list")
                             else:
                                 st.error("Invalid episode selection")
@@ -639,16 +640,16 @@ def batch_download_page():
 
     with tab2:
         st.header("View Current list")
-        if st.session_state.batch_manager.download_list:
+        if st.session_state['batch_manager'].download_list:
             selected_anime = st.radio(
                 "Select anime to modify:",
-                [item.name for item in st.session_state.batch_manager.download_list]
+                [item.name for item in st.session_state['batch_manager'].download_list]
             )
 
             if selected_anime:
                 # Find the selected anime item
                 anime_item = next(
-                    item for item in st.session_state.batch_manager.download_list
+                    item for item in st.session_state['batch_manager'].download_list
                     if item.name == selected_anime
                 )
 
@@ -680,8 +681,8 @@ def batch_download_page():
 
                 # Option to remove anime from list
                 if st.button("Remove from List", key=f"remove_{selected_anime}"):
-                    st.session_state.batch_manager.download_list = [
-                        item for item in st.session_state.batch_manager.download_list
+                    st.session_state['batch_manager']['download_list'] = [
+                        item for item in st.session_state['batch_manager'].download_list
                         if item.name != selected_anime
                     ]
                     st.success(f"Removed {selected_anime} from list")
@@ -699,14 +700,14 @@ def batch_download_page():
             save_name = st.text_input("Save list as:", placeholder="batch_list.json")
             if st.button("Save List"):
                 try:
-                    saved_path = st.session_state.batch_manager.save_list(save_name)
+                    saved_path = st.session_state['batch_manager'].save_list(save_name)
                     if saved_path is not None:
                         st.success(f"List saved as {saved_path.name}")
                 except Exception as e:
                     st.error(f"Error saving list: {str(e)}")
 
         with col2:
-            saved_lists = st.session_state.batch_manager.get_all_saved_lists()
+            saved_lists = st.session_state['batch_manager'].get_all_saved_lists()
             if saved_lists:
                 selected_list = st.selectbox("Load saved list:", saved_lists)
                 load_method = st.radio("Load method:", ["Replace", "Merge"])
@@ -714,17 +715,17 @@ def batch_download_page():
                 if col1.button("Load List"):
                     try:
                         if load_method == "Replace":
-                            st.session_state.batch_manager.load_list(selected_list)
+                            st.session_state['batch_manager'].load_list(selected_list)
                             st.success("List loaded successfully!")
                         else:
-                            added = st.session_state.batch_manager.merge_list(selected_list)
+                            added = st.session_state['batch_manager'].merge_list(selected_list)
                             st.success(f"Merged successfully! Added {added} new items.")
                         time.sleep(2)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error loading list: {str(e)}")
                 if col2.button("Delete list"):
-                    st.session_state.batch_manager.delete_list(selected_list)
+                    st.session_state['batch_manager'].delete_list(selected_list)
                     time.sleep(2)
                     st.error("List Deleted")
             else:
@@ -735,33 +736,33 @@ def batch_download_page():
             export_name = st.text_input("Export filename:", value="exported_list")
             if st.button("Export List"):
                 try:
-                    export_path = st.session_state.batch_manager.export_list(export_name, export_format)
+                    export_path = st.session_state['batch_manager'].export_list(export_name, export_format)
                     st.success(f"List exported as {export_path.name}")
                 except Exception as e:
                     st.error(f"Error exporting list: {str(e)}")
 
     with tab4:
         st.header("Start Batch Download")
-        if not st.session_state.batch_manager.download_list:
+        if not st.session_state['batch_manager'].download_list:
             st.warning("Batch list is empty. Please add some anime first.")
         else:
-            total_episodes = sum(len(item.episodes) for item in st.session_state.batch_manager.download_list)
-            st.write(f"Total anime: {len(st.session_state.batch_manager.download_list)}")
+            total_episodes = sum(len(item.episodes) for item in st.session_state['batch_manager'].download_list)
+            st.write(f"Total anime: {len(st.session_state['batch_manager'].download_list)}")
             st.write(f"Total episodes: {total_episodes}")
 
             if st.button("Start Batch Download"):
                 if 'download_started' not in st.session_state:
-                    st.session_state.download_started = True
+                    st.session_state['download_started'] = True
 
                     if 'download_manager' not in st.session_state:
-                        st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
+                        st.session_state['download_manager'] = DownloadManager(max_concurrent=max_threads)
 
                     st.write("### Download Progress")
                     # Create a single event loop for all downloads
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     try:
-                        for item in st.session_state.batch_manager.download_list:
+                        for item in st.session_state['batch_manager'].download_list:
                             st.write(f"#### {item.name}")
                             download_path = os.path.join(download_folder, item.name)
                             
@@ -783,15 +784,15 @@ def batch_download_page():
                             )
                             print(4)
                             # Reset download manager for next anime
-                            loop.run_until_complete(st.session_state.download_manager.stop())
-                            st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
-                            loop.run_until_complete(st.session_state.download_manager.start())
+                            loop.run_until_complete(st.session_state['download_manager'].stop())
+                            st.session_state['download_manager'] = DownloadManager(max_concurrent=max_threads)
+                            loop.run_until_complete(st.session_state['download_manager'].start())
 
                     except Exception as e:
                         st.error(f"Error in batch download: {str(e)}")
                     finally:
                         loop.close()
-                        st.session_state.download_started = False
+                        st.session_state['download_started'] = False
 
 
 def clean_filename(filename):
@@ -836,8 +837,8 @@ async def download_link_async(session, link):
 async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     """Downloads multiple episodes using the download manager"""
     if 'download_manager' not in st.session_state:
-        st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
-    download_manager = st.session_state.download_manager
+        st.session_state['download_manager'] = DownloadManager(max_concurrent=max_threads)
+    download_manager = st.session_state['download_manager']
 
     try:
         if not hasattr(download_manager, 'session') or download_manager.session is None:
@@ -936,9 +937,9 @@ def single_download_page():
         animes = get_names(response)
 
     if 'page' not in st.session_state:
-        st.session_state.page = 'search'
+        st.session_state['page'] = 'search'
 
-    if st.session_state.page == 'search' and animes and anime_name:
+    if st.session_state['page'] == 'search' and animes and anime_name:
         st.write("#### Anime Search Results")
 
         # Create radio options with anime names
@@ -950,13 +951,13 @@ def single_download_page():
             selected_url = animes[selected_index][1]
 
         if st.button("Continue to Episode Selection"):
-            st.session_state.page = 'episodes'  # Change page state
-            st.session_state.selected_anime = animes[selected_index]  # Store selected anime
+            st.session_state['page'] = 'episodes'  # Change page state
+            st.session_state['selected_anime'] = animes[selected_index]  # Store selected anime
             st.rerun()  # Reload the page
 
-    elif st.session_state.page == 'episodes':
+    elif st.session_state['page'] == 'episodes':
         if st.button("Back to Search"):
-            st.session_state.page = 'search'
+            st.session_state['page'] = 'search'
             st.rerun()
 
         st.write(f"### {st.session_state.selected_anime[0]} episodes")
@@ -995,12 +996,12 @@ def single_download_page():
                     end = st.number_input("End episode", min_value=start + 1, max_value=len(episodes), value=min(start + 1, len(episodes)))
 
                 if st.button("Download Range"):
-                    if 'download_started' not in st.session_state or st.session_state.download_started is False:
-                        st.session_state.download_started = True
+                    if 'download_started' not in st.session_state or st.session_state['download_started'] is False:
+                        st.session_state['download_started'] = True
                         selected_episodes = episodes[start-1:end]
                         save_path = os.path.join(download_folder, anime_name)
-                        st.session_state.episodes_to_download = selected_episodes
-                        print(selected_episodes)
+                        st.session_state['episodes_to_download'] = selected_episodes
+
                         try:
                             st.write("### Downloads")
 
@@ -1016,7 +1017,7 @@ def single_download_page():
                             )
                             loop.close()
                         except Exception as e:
-                            st.session_state.download_started = False
+                            st.session_state['download_started'] = False
                             st.error(f"Error starting download: {str(e)}")
                             raise e
 
@@ -1059,12 +1060,12 @@ def single_download_page():
                         raise e
         else:
             if st.button("Download"):
-                if 'download_started' not in st.session_state or st.session_state.download_started is False:
-                    st.session_state.download_started = True
+                if 'download_started' not in st.session_state or st.session_state['download_started'] is False:
+                    st.session_state['download_started'] = True
                     selected_episode = [episodes[0]]
                     save_path = os.path.join(download_folder, anime_name)
-                    st.session_state.episodes_to_download = selected_episode
-                    print(selected_episode)
+                    st.session_state['episodes_to_download'] = selected_episode
+
                     try:
                         st.write("### Downloading...")
 
@@ -1079,9 +1080,10 @@ def single_download_page():
                         )
 
                     except Exception as e:
-                        st.session_state.download_started = False
+                        st.session_state['download_started'] = False
                         st.error(f"Error starting download: {str(e)}")
                         raise e
+
 
 def save_setup(settings):
     """Save settings to setup.json"""
@@ -1130,7 +1132,9 @@ def settings_page():
     # Concurrent Downloads Settings
     st.header("Download Settings")
 
-    concurrent_downloads = st.empty()
+    Col1, Col2 = st.columns([0.8,0.2])
+
+    concurrent_downloads = Col1.empty()
 
     # Function to create the number input
     def create_number_input(value):
@@ -1150,10 +1154,10 @@ def settings_page():
     details_container = st.empty()
 
     # Save Button and Reset Button in columns
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
-    with col1:
-        if st.button("Optimize Max Threads", help="Finds the Optimum number of Concurrent Downloads"):
+    with Col2:
+        if st.button("Optimize \n Threads", help="Finds the Optimum number of Concurrent Downloads"):
             async def estimate_optimal_workers(
                     test_url: str = "https://www.google.com",
                     max_workers: int = 10,
@@ -1233,7 +1237,7 @@ def settings_page():
             f"Maximum concurrent downloads changed from {setup.get('max_threads', 3)} to {current_value}")
         temp_settings["max_threads"] = int(current_value)
 
-    with col2:
+    with col1:
         if st.button("Save Changes"):
             if not changes_made:
                 st.info("No changes to save.")
@@ -1254,7 +1258,7 @@ def settings_page():
                 else:
                     st.error("Cannot save: Invalid download path")
 
-    with col3:
+    with col2:
         if st.button("Reset to Default Settings"):
             default_settings = {
                 "downloads": os.path.join(os.path.expanduser("~"), "Downloads"),
