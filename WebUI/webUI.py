@@ -764,6 +764,8 @@ def batch_download_page():
                     try:
                         for item in st.session_state['batch_manager'].download_list:
                             st.write(f"#### {item.name}")
+                            item.name  = re.sub(r'[<>:"/\\|?*]', '_', item.name)
+
                             download_path = os.path.join(download_folder, item.name)
                             
                             episode_list = [
@@ -830,7 +832,7 @@ async def download_link_async(session, link):
                         return [link, title]
                     backup_link = [link, quality]
 
-            print(f"Downloading in {backup_link[1]}p")
+            # print(f"Downloading in {backup_link[1]}p")
             return [backup_link[0], title]
 
 
@@ -846,7 +848,6 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     if 'download_manager' not in st.session_state:
         st.session_state['download_manager'] = DownloadManager(max_concurrent=max_threads)
     download_manager = st.session_state['download_manager']
-
     try:
         if not hasattr(download_manager, 'session') or download_manager.session is None:
             await download_manager.start()
@@ -1009,6 +1010,7 @@ def single_download_page():
                     if 'download_started' not in st.session_state or st.session_state['download_started'] is False:
                         st.session_state['download_started'] = True
                         selected_episodes = episodes[start-1:end]
+                        anime_name = re.sub(r'[<>:"/\\|?*]', '_', anime_name)
                         save_path = os.path.join(download_folder, anime_name)
                         st.session_state['episodes_to_download'] = selected_episodes
 
@@ -1026,13 +1028,17 @@ def single_download_page():
                                 )
                             )
                             loop.close()
+                            st.session_state['download_started'] = False
                         except Exception as e:
                             st.session_state['download_started'] = False
                             st.error(f"Error starting download: {str(e)}")
                             raise e
+                        finally:
+                            st.session_state['download_started'] = False
 
+            # Select individual episodes
             else:
-                col1, col2= st.columns(2)
+                col1, col2 = st.columns(2)
 
                 episode_input = col1.text_input(
                     "Enter episode numbers (e.g., 1 3 5-7):",
@@ -1044,6 +1050,7 @@ def single_download_page():
                         selected_numbers = parse_episode_selection(episode_input, len(episodes))
                         selected_episodes = [episodes[ep - 1] for ep in selected_numbers]
                         st.session_state.episodes_to_download = selected_episodes
+                        anime_name = re.sub(r'[<>:"/\\|?*]', '_', anime_name)
                         save_path = os.path.join(download_folder, anime_name)
 
                         st.write("### Downloads")
@@ -1060,7 +1067,7 @@ def single_download_page():
                             )
                         )
                         loop.close()
-                        st.session_state.download_started = False
+                        st.session_state['download_started'] = False
 
                     except ValueError:
                         st.error("Invalid episode selection. Please try again.")
@@ -1068,11 +1075,13 @@ def single_download_page():
                         st.session_state.download_started = False
                         st.error(f"Error starting download: {str(e)}")
                         raise e
+
         else:
             if st.button("Download"):
                 if 'download_started' not in st.session_state or st.session_state['download_started'] is False:
                     st.session_state['download_started'] = True
                     selected_episode = [episodes[0]]
+                    anime_name = re.sub(r'[<>:"/\\|?*]', '_', anime_name)
                     save_path = os.path.join(download_folder, anime_name)
                     st.session_state['episodes_to_download'] = selected_episode
 
@@ -1309,7 +1318,7 @@ def main():
         ["Single", "Batch", "Settings"],
     )
 
-    if st.sidebar.checkbox("Show Session State Debug"):
+    if st.sidebar.checkbox("Show Session State Debug", True):
         st.sidebar.write(st.session_state)
 
     if page == "Single":
