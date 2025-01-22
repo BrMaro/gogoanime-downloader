@@ -950,7 +950,7 @@ def single_download_page():
 
         # Get episodes data
         response = BeautifulSoup(requests.get(f"{base_url}{st.session_state.selected_anime[1]}").text, "html.parser")
-        base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'",str(response.find("script", {"src": ""}))).group(1)
+        base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'", str(response.find("script", {"src": ""}))).group(1)
         movie_id = response.find("input", {"id": "movie_id"}).get("value")
         last_ep = response.find("ul", {"id": "episode_page"}).find_all("a")[-1].get("ep_end")
 
@@ -974,7 +974,7 @@ def single_download_page():
         )
 
         if download_method == "Range":
-            col1, col2 = st.columns(2)
+            col1, col2, col3, col4= st.columns(4)
             with col1:
                 start = st.number_input("Start episode", min_value=1, max_value=len(episodes), value=1)
             with col2:
@@ -1007,7 +1007,9 @@ def single_download_page():
                         raise e
 
         else:
-            episode_input = st.text_input(
+            col1, col2= st.columns(2)
+
+            episode_input = col1.text_input(
                 "Enter episode numbers (e.g., 1 3 5-7):",
                 key="episode_selection"
             )
