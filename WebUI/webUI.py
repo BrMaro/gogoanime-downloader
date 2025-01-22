@@ -836,6 +836,13 @@ async def download_link_async(session, link):
 
 async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     """Downloads multiple episodes using the download manager"""
+    # Disable sidebar during downloads
+    st.sidebar.empty()
+    st.sidebar.info("⏳ Download in progress. Please wait...")
+    disable_sidebar = st.markdown("""
+       <style>[data-testid="stSidebar"] {pointer-events: none; opacity: 0.4;}</style>
+    """, unsafe_allow_html=True)
+
     if 'download_manager' not in st.session_state:
         st.session_state['download_manager'] = DownloadManager(max_concurrent=max_threads)
     download_manager = st.session_state['download_manager']
@@ -871,6 +878,9 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path):
         for task in download_tasks:
             while task.state not in [DownloadState.COMPLETED, DownloadState.ERROR, DownloadState.CANCELLED]:
                 await asyncio.sleep(0.5)
+
+        disable_sidebar.empty()
+        st.rerun()
 
     except Exception as e:
         st.error(f"Download manager error: {str(e)}")
@@ -1132,7 +1142,7 @@ def settings_page():
     # Concurrent Downloads Settings
     st.header("Download Settings")
 
-    Col1, Col2 = st.columns([0.8,0.2])
+    Col1, Col2 = st.columns([0.7,0.3])
 
     concurrent_downloads = Col1.empty()
 
@@ -1157,7 +1167,7 @@ def settings_page():
     col1, col2 = st.columns(2)
 
     with Col2:
-        if st.button("Optimize \n Threads", help="Finds the Optimum number of Concurrent Downloads"):
+        if st.button("Optimize\nThreads", help="Finds the Optimum number of Concurrent Downloads"):
             async def estimate_optimal_workers(
                     test_url: str = "https://www.google.com",
                     max_workers: int = 10,
@@ -1290,26 +1300,13 @@ def settings_page():
 
 def main():
     st.sidebar.title("Anime Downloader")
-    # if 'current_page' not in st.session_state:
-    #     st.session_state.current_page = "Single"
 
-    # new_page = st.sidebar.radio("Navigation", ["Single", "Batch", "Settings"], index=["Single", "Batch", "Settings"].index(st.session_state.current_page)         )
+    # if 'sidebar_content' not in st.session_state:
+    #     st.session_state['sidebar_con']
 
-    # is_downloading = st.session_state.get("download_started", False)
-    #
-    # if is_downloading:
-    #     st.sidebar.markdown("**Current Page:**")
-    #     st.sidebar.markdown(f"**{st.session_state.current_page}**")
-    #     st.sidebar.error("⚠️ Download in progress! Navigation disabled until download completes.")
-    #     st.sidebar.markdown("---")
-    #     st.sidebar.markdown("🔄 **Download in progress**")
-    #     page = st.session_state.current_page
-    #
-    # else:
     page = st.sidebar.radio(
         "Navigation",
         ["Single", "Batch", "Settings"],
-        # index=["Single", "Batch", "Settings"].index(st.session_state.current_page)
     )
 
     if st.sidebar.checkbox("Show Session State Debug"):
