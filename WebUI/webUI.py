@@ -11,7 +11,6 @@ from typing import List, Dict, Optional
 from enum import Enum
 from datetime import datetime
 import re
-from pathlib import Path
 import time
 import psutil
 import math
@@ -51,23 +50,38 @@ class DownloadTask:
         self.filename = filename
         self.folder = folder
         self.episode = episode
+        self.file_path = os.path.join(folder, filename)
         self.state = DownloadState.QUEUED
-        self.progress = DownloadProgress(0, 0, 0.0, 0.0)
+        self.progress = DownloadProgress(0, 0, 0, 0)
         self.start_time = None
-        self.pause_event = asyncio.Event()
-        self.cancel_event = asyncio.Event()
-        self.pause_event.set()
-        self.progress_bar = None
         self.status_text = None
-
-    @property
-    def file_path(self) -> str:
-        return os.path.join(self.folder, f"{self.filename}.mp4")
+        self.cancel_event = asyncio.Event()
+        self.pause_event = asyncio.Event()
+        self.pause_event.set()  # Initially not paused
 
     def setup_progress_ui(self):
-        # Create a placeholder for this download's progress
-        self.status_text = st.empty()
-        self.progress_bar = st.progress(0)
+        col1, col2 = st.columns([0.1, 0.9])
+
+        with col1:
+            button_key = f"play_pause_button_{self.episode}"
+            state_key = f"download_state_{self.episode}"
+
+            # Initialize state if not exists
+            if state_key not in st.session_state:
+                st.session_state[state_key] = self.state
+
+            if st.session_state[state_key] == DownloadState.PAUSED:
+                if st.button("▶️", key=button_key):
+                    self.resume()
+                    st.session_state[state_key] = DownloadState.DOWNLOADING
+            else:
+                if st.button("⏸️", key=button_key):
+                    self.pause()
+                    st.session_state[state_key] = DownloadState.PAUSED
+
+        with col2:
+            self.status_text = st.empty()
+            self.progress_bar = st.progress(0)
 
     def update_progress(self):
         if self.progress_bar and self.status_text:
@@ -89,6 +103,16 @@ class DownloadTask:
                     total_bytes=self.progress.total_bytes,
                     speed=self.progress.speed
                 )
+
+    def pause(self):
+        """Pause the download"""
+        self.pause_event.clear()
+        self.state = DownloadState.PAUSED
+
+    def resume(self):
+        """Resume the download"""
+        self.pause_event.set()
+        self.state = DownloadState.DOWNLOADING
 
 
 class DownloadManager:
@@ -236,6 +260,18 @@ class DownloadManager:
             if task.status_text:
                 task.status_text.error(f"Download error for episode {task.episode}: {str(e)}")
             raise
+
+    async def resume_download(self,file_path:str):
+        if file_path in self.active_downloads:
+            task = self.active_downloads[file_path]
+            if task.state == DownloadState.PAUSED:
+                task.resume()
+
+    async def pause_download(self,file_path:str):
+        if file_path in self.active_downloads:
+            task = self.active_downloads[file_path]
+            if task.state == DownloadState.DOWNLOADING:
+                task.pause()
 
 
 @dataclass
@@ -704,13 +740,11 @@ def batch_download_page():
 
                     if 'download_manager' not in st.session_state:
                         st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
-    
+
                     st.write("### Download Progress")
-                    print(1)
                     # Create a single event loop for all downloads
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-
                     try:
                         for item in st.session_state.batch_manager.download_list:
                             st.write(f"#### {item.name}")
@@ -786,12 +820,9 @@ async def download_link_async(session, link):
 
 async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     """Downloads multiple episodes using the download manager"""
-    print("a")
     if 'download_manager' not in st.session_state:
         st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
-    print("b")
     download_manager = st.session_state.download_manager
-    print("c")
     try:
         # Start the download manager if it's not running
         if not hasattr(download_manager, 'session') or download_manager.session is None:
@@ -881,8 +912,13 @@ def single_download_page():
 
     try:
         pages = response.find("ul", {"class": "pagination-list"}).find_all("li")
-        animes = [anime for page in pages for anime in get_names(
-            BeautifulSoup(requests.get(f"{base_url}/search.html{page.a.get('href')}").text, "html.parser"))]
+        animes = []
+        for page in pages:
+            page_url = f"{base_url}/search.html{page.a.get('href')}"
+            response = requests.get(page_url)
+            soup = BeautifulSoup(response.text, "html.parser")
+            animes.extend(get_names(soup))
+
     except AttributeError:
         animes = get_names(response)
 
@@ -906,6 +942,10 @@ def single_download_page():
             st.rerun()  # Reload the page
 
     elif st.session_state.page == 'episodes':
+        if st.button("Back to Search"):
+            st.session_state.page = 'search'
+            st.rerun()
+
         st.write(f"### {st.session_state.selected_anime[0]} episodes")
 
         # Get episodes data
@@ -1002,9 +1042,7 @@ def single_download_page():
                     st.error(f"Error starting download: {str(e)}")
                     raise e
 
-        if st.button("Back to Search"):
-            st.session_state.page = 'search'
-            st.rerun()
+
 
 
 def save_setup(settings):
@@ -1210,7 +1248,30 @@ def settings_page():
 
 def main():
     st.sidebar.title("Anime Downloader")
-    page = st.sidebar.radio("Navigation", ["Single", "Batch","Settings"])
+    # if 'current_page' not in st.session_state:
+    #     st.session_state.current_page = "Single"
+
+    # new_page = st.sidebar.radio("Navigation", ["Single", "Batch", "Settings"], index=["Single", "Batch", "Settings"].index(st.session_state.current_page)         )
+
+    # is_downloading = st.session_state.get("download_started", False)
+    #
+    # if is_downloading:
+    #     st.sidebar.markdown("**Current Page:**")
+    #     st.sidebar.markdown(f"**{st.session_state.current_page}**")
+    #     st.sidebar.error("⚠️ Download in progress! Navigation disabled until download completes.")
+    #     st.sidebar.markdown("---")
+    #     st.sidebar.markdown("🔄 **Download in progress**")
+    #     page = st.session_state.current_page
+    #
+    # else:
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Single", "Batch", "Settings"],
+        # index=["Single", "Batch", "Settings"].index(st.session_state.current_page)
+    )
+
+    if st.sidebar.checkbox("Show Session State Debug"):
+        st.sidebar.write(st.session_state)
 
     if page == "Single":
         single_download_page()
