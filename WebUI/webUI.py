@@ -590,8 +590,8 @@ def batch_download_page():
 
     with tab1:
         st.header("Add Anime to Batch")
-
-        anime_name = st.text_input("Search Anime:", key="batch_search")
+        col1, col2 = st.columns(2)
+        anime_name = col1.text_input("Search Anime:", key="batch_search")
         if anime_name:
             response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={anime_name}").text, "html.parser")
             try:
