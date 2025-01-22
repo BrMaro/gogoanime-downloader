@@ -79,7 +79,7 @@ class DownloadTask:
         #             self.pause()
         #             st.session_state[state_key] = DownloadState.PAUSED
         #
-        # with col2:
+        with col2:
             self.status_text = st.empty()
             self.progress_bar = st.progress(0)
 
@@ -979,33 +979,68 @@ def single_download_page():
 
         st.write(f"Found {len(episodes)} episodes")
 
-        # Create download options
-        download_method = st.radio(
-            "Select download method:",
-            ["Range", "Specific episodes"],
-            key="download_method"
-        )
+        if len(episodes) > 1:
+            # Create download options
+            download_method = st.radio(
+                "Select download method:",
+                ["Range", "Specific episodes"],
+                key="download_method"
+            )
 
-        if download_method == "Range":
-            col1, col2, col3, col4= st.columns(4)
-            with col1:
-                start = st.number_input("Start episode", min_value=1, max_value=len(episodes), value=1)
-            with col2:
-                end = st.number_input("End episode", min_value=start + 1, max_value=len(episodes), value=min(start + 1, len(episodes)))
+            if download_method == "Range":
+                col1, col2, col3, col4= st.columns(4)
+                with col1:
+                    start = st.number_input("Start episode", min_value=1, max_value=len(episodes), value=1)
+                with col2:
+                    end = st.number_input("End episode", min_value=start + 1, max_value=len(episodes), value=min(start + 1, len(episodes)))
 
-            if st.button("Download Range"):
-                if 'download_started' not in st.session_state or st.session_state.download_started is False:
-                    st.session_state.download_started = True
-                    selected_episodes = episodes[start-1:end]
-                    save_path = os.path.join(download_folder, anime_name)
-                    st.session_state.episodes_to_download = selected_episodes
+                if st.button("Download Range"):
+                    if 'download_started' not in st.session_state or st.session_state.download_started is False:
+                        st.session_state.download_started = True
+                        selected_episodes = episodes[start-1:end]
+                        save_path = os.path.join(download_folder, anime_name)
+                        st.session_state.episodes_to_download = selected_episodes
+                        print(selected_episodes)
+                        try:
+                            st.write("### Downloads")
 
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+
+                            loop.run_until_complete(
+                                download_episodes(
+                                    selected_episodes,
+                                    st.session_state.selected_anime[0],
+                                    save_path
+                                )
+                            )
+                            loop.close()
+                        except Exception as e:
+                            st.session_state.download_started = False
+                            st.error(f"Error starting download: {str(e)}")
+                            raise e
+
+            else:
+                col1, col2= st.columns(2)
+
+                episode_input = col1.text_input(
+                    "Enter episode numbers (e.g., 1 3 5-7):",
+                    key="episode_selection"
+                )
+
+                if st.button("Download Selected"):
                     try:
+                        selected_numbers = parse_episode_selection(episode_input, len(episodes))
+                        selected_episodes = [episodes[ep - 1] for ep in selected_numbers]
+                        st.session_state.episodes_to_download = selected_episodes
+                        save_path = os.path.join(download_folder, anime_name)
+
                         st.write("### Downloads")
 
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
 
+                        # Run the download in the event loop
                         loop.run_until_complete(
                             download_episodes(
                                 selected_episodes,
@@ -1014,49 +1049,39 @@ def single_download_page():
                             )
                         )
                         loop.close()
+                        st.session_state.download_started = False
+
+                    except ValueError:
+                        st.error("Invalid episode selection. Please try again.")
                     except Exception as e:
                         st.session_state.download_started = False
                         st.error(f"Error starting download: {str(e)}")
                         raise e
-
         else:
-            col1, col2= st.columns(2)
-
-            episode_input = col1.text_input(
-                "Enter episode numbers (e.g., 1 3 5-7):",
-                key="episode_selection"
-            )
-
-            if st.button("Download Selected"):
-                try:
-                    selected_numbers = parse_episode_selection(episode_input, len(episodes))
-                    selected_episodes = [episodes[ep - 1] for ep in selected_numbers]
-                    st.session_state.episodes_to_download = selected_episodes
+            if st.button("Download"):
+                if 'download_started' not in st.session_state or st.session_state.download_started is False:
+                    st.session_state.download_started = True
+                    selected_episode = [episodes[0]]
                     save_path = os.path.join(download_folder, anime_name)
+                    st.session_state.episodes_to_download = selected_episode
+                    print(selected_episode)
+                    try:
+                        st.write("### Downloading...")
 
-                    st.write("### Downloads")
+                        loop = asyncio.new_event_loop()
 
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                    # Run the download in the event loop
-                    loop.run_until_complete(
-                        download_episodes(
-                            selected_episodes,
-                            st.session_state.selected_anime[0],
-                            save_path
+                        loop.run_until_complete(
+                            download_episodes(
+                                selected_episode,
+                                st.session_state.selected_anime[0],
+                                save_path
+                            )
                         )
-                    )
-                    loop.close()
-                    st.session_state.download_started = False
 
-                except ValueError:
-                    st.error("Invalid episode selection. Please try again.")
-                except Exception as e:
-                    st.session_state.download_started = False
-                    st.error(f"Error starting download: {str(e)}")
-                    raise e
-
+                    except Exception as e:
+                        st.session_state.download_started = False
+                        st.error(f"Error starting download: {str(e)}")
+                        raise e
 
 def save_setup(settings):
     """Save settings to setup.json"""
