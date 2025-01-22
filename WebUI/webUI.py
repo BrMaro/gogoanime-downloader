@@ -62,24 +62,24 @@ class DownloadTask:
     def setup_progress_ui(self):
         col1, col2 = st.columns([0.1, 0.9])
 
-        with col1:
-            button_key = f"play_pause_button_{self.episode}"
-            state_key = f"download_state_{self.episode}"
-
-            # Initialize state if not exists
-            if state_key not in st.session_state:
-                st.session_state[state_key] = self.state
-
-            if st.session_state[state_key] == DownloadState.PAUSED:
-                if st.button("▶️", key=button_key):
-                    self.resume()
-                    st.session_state[state_key] = DownloadState.DOWNLOADING
-            else:
-                if st.button("⏸️", key=button_key):
-                    self.pause()
-                    st.session_state[state_key] = DownloadState.PAUSED
-
-        with col2:
+        # with col1:
+        #     button_key = f"play_pause_button_{self.episode}"
+        #     state_key = f"download_state_{self.episode}"
+        #
+        #     # Initialize state if not exists
+        #     if state_key not in st.session_state:
+        #         st.session_state[state_key] = self.state
+        #
+        #     if st.session_state[state_key] == DownloadState.PAUSED:
+        #         if st.button("▶️", key=button_key):
+        #             self.resume()
+        #             st.session_state[state_key] = DownloadState.DOWNLOADING
+        #     else:
+        #         if st.button("⏸️", key=button_key):
+        #             self.pause()
+        #             st.session_state[state_key] = DownloadState.PAUSED
+        #
+        # with col2:
             self.status_text = st.empty()
             self.progress_bar = st.progress(0)
 
@@ -104,15 +104,17 @@ class DownloadTask:
                     speed=self.progress.speed
                 )
 
-    def pause(self):
-        """Pause the download"""
-        self.pause_event.clear()
-        self.state = DownloadState.PAUSED
-
-    def resume(self):
-        """Resume the download"""
-        self.pause_event.set()
-        self.state = DownloadState.DOWNLOADING
+    # def pause(self):
+    #     print("DownloadTask pause")
+    #     """Pause the download"""
+    #     self.pause_event.clear()
+    #     self.state = DownloadState.PAUSED
+    #
+    # def resume(self):
+    #     print("DownloadTask pause")
+    #     """Resume the download"""
+    #     self.pause_event.set()
+    #     self.state = DownloadState.DOWNLOADING
 
 
 class DownloadManager:
@@ -191,6 +193,9 @@ class DownloadManager:
                     continue
 
                 try:
+                    while task.state == DownloadState.PAUSED:
+                        await task.pause_event.wait()
+
                     await self._process_download(task)
                 except Exception as e:
                     task.state = DownloadState.ERROR
@@ -261,17 +266,27 @@ class DownloadManager:
                 task.status_text.error(f"Download error for episode {task.episode}: {str(e)}")
             raise
 
-    async def resume_download(self,file_path:str):
-        if file_path in self.active_downloads:
-            task = self.active_downloads[file_path]
-            if task.state == DownloadState.PAUSED:
-                task.resume()
-
-    async def pause_download(self,file_path:str):
-        if file_path in self.active_downloads:
-            task = self.active_downloads[file_path]
-            if task.state == DownloadState.DOWNLOADING:
-                task.pause()
+    # async def pause_download(self, file_path: str):
+    #     """Pause a download"""
+    #     if file_path in self.active_downloads:
+    #         task = self.active_downloads[file_path]
+    #         if task.state == DownloadState.DOWNLOADING:
+    #             task.state = DownloadState.PAUSED
+    #             if task.pause_event:
+    #                 task.pause_event.clear()  # Block until resumed
+    #             if task.status_text:
+    #                 task.status_text.info(f"Paused download for episode {task.episode}")
+    #
+    # async def resume_download(self, file_path: str):
+    #     """Resume a paused download"""
+    #     if file_path in self.active_downloads:
+    #         task = self.active_downloads[file_path]
+    #         if task.state == DownloadState.PAUSED:
+    #             task.state = DownloadState.DOWNLOADING
+    #             if task.pause_event:
+    #                 task.pause_event.set()  # Allow download to continue
+    #             if task.status_text:
+    #                 task.status_text.info(f"Resumed download for episode {task.episode}")
 
 
 @dataclass
@@ -823,11 +838,11 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path):
     if 'download_manager' not in st.session_state:
         st.session_state.download_manager = DownloadManager(max_concurrent=max_threads)
     download_manager = st.session_state.download_manager
+
     try:
-        # Start the download manager if it's not running
         if not hasattr(download_manager, 'session') or download_manager.session is None:
             await download_manager.start()
-        print("d")
+
         download_tasks = []
         for episode in episodes:
             try:
@@ -850,19 +865,17 @@ async def download_episodes(episodes: List[dict], anime_name: str, save_path):
             except Exception as e:
                 st.error(f"Error processing episode {episode['episode']}: {str(e)}")
                 continue
-        print("e")
-        # Since tasks are already running, we just need to wait for them to complete
+
+        # Since tasks are already running,  wait for them to complete
         for task in download_tasks:
             while task.state not in [DownloadState.COMPLETED, DownloadState.ERROR, DownloadState.CANCELLED]:
                 await asyncio.sleep(0.5)
-        print("f")
+
     except Exception as e:
         st.error(f"Download manager error: {str(e)}")
         raise e
     finally:
-        # Always try to stop the download manager
         try:
-            print("g")
             await download_manager.stop()
         except Exception as e:
             st.error(f"Error stopping download manager: {str(e)}")
@@ -1043,8 +1056,6 @@ def single_download_page():
                     st.session_state.download_started = False
                     st.error(f"Error starting download: {str(e)}")
                     raise e
-
-
 
 
 def save_setup(settings):
