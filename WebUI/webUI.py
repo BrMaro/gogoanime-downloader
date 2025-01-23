@@ -580,7 +580,6 @@ def downloads_page():
                             st.button("Cancel", key=f"cancel_{anime_name}_{download['episode']}")
 
 
-
 def batch_download_page():
     if 'batch_manager' not in st.session_state:
         st.session_state['batch_manager'] = BatchManager()
@@ -784,7 +783,6 @@ def batch_download_page():
                                     download_path
                                 )
                             )
-                            print(4)
                             # Reset download manager for next anime
                             loop.run_until_complete(st.session_state['download_manager'].stop())
                             st.session_state['download_manager'] = DownloadManager(max_concurrent=max_threads)
@@ -800,6 +798,43 @@ def batch_download_page():
 def clean_filename(filename):
     cleaned_filename = re.sub(r'[\\/*?:"<>|]', '§', filename)
     return cleaned_filename
+
+
+def get_preview(link):
+    try:
+        response = requests.get(f"{base_url}{link}")
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        anime_info_section = soup.find(class_="anime_info_body_bg")
+        anime_data = []
+
+        # for section in anime_info_sections:
+        # Extract individual fields
+        title = anime_info_section.find("h1").get_text(strip=True) if anime_info_section.find("h1") else None
+        synopsis = anime_info_section.find("div", class_="description").get_text(strip=True) if anime_info_section.find("div",                                                                               class_="description") else None
+        genre_div = anime_info_section.find_all("p", class_='type')[2] if len(anime_info_section.find_all("p", class_="type")) > 2 else None
+        genres = [genre.get_text(strip=True).replace(', ','') for genre in genre_div.find_all("a")] if genre_div else []
+        release_date_tag = anime_info_section.find_all("p", class_="type")[3] if len(
+            anime_info_section.find_all("p", class_="type")) > 3 else None
+        release_date = release_date_tag.get_text(strip=True).replace("Released: ", "") if release_date_tag else None
+        release_date = release_date.replace("Released:","")
+        image_link = anime_info_section.find("img")["src"] if anime_info_section.find("img") else None
+
+        # Append the extracted data as a dictionary
+        anime_data.append({
+            "title": title,
+            "synopsis": synopsis,
+            "genres": genres,
+            "release_date": release_date,
+            "image_link": image_link
+        })
+
+        print(anime_data)
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching anime data: {str(e)}")
+        return None
 
 
 async def download_link_async(session, link):
@@ -972,7 +1007,8 @@ def single_download_page():
             st.rerun()
 
         st.write(f"### {st.session_state.selected_anime[0]} episodes")
-
+        # print(f"{base_url}{st.session_state.selected_anime[1]}")
+        # print(get_preview(st.session_state.selected_anime[1]))
         # Get episodes data
         response = BeautifulSoup(requests.get(f"{base_url}{st.session_state.selected_anime[1]}").text, "html.parser")
         base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'", str(response.find("script", {"src": ""}))).group(1)
@@ -1318,8 +1354,8 @@ def main():
         ["Single", "Batch", "Settings"],
     )
 
-    if st.sidebar.checkbox("Show Session State Debug", True):
-        st.sidebar.write(st.session_state)
+    # if st.sidebar.checkbox("Show Session State Debug", True):
+    #     st.sidebar.write(st.session_state)
 
     if page == "Single":
         single_download_page()
