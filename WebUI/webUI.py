@@ -6,7 +6,7 @@ import asyncio
 import os
 import aiohttp
 import aiofiles
-from dataclasses import dataclass,asdict
+from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional
 from enum import Enum
 from datetime import datetime
@@ -16,7 +16,6 @@ import psutil
 import math
 from pathlib import Path
 
-
 with open("../WebUI/setup.json", "r") as f:
     setup = json.load(f)
 
@@ -25,6 +24,7 @@ download_folder = setup["downloads"]
 captcha_v3 = setup["captcha_v3"]
 download_quality = int(setup["download_quality"])
 max_threads = setup["max_threads"]
+preview_status = "No Preview"
 
 
 class DownloadState(Enum):
@@ -474,7 +474,7 @@ class DownloadPageManager:
             if download['status'] == 'queued' and download['url'] not in st.session_state['active_downloads']:
                 anime_name = download['anime-name']
                 if anime_name not in downloads_by_anime:
-                    downloads_by_anime[anime_name]=[]
+                    downloads_by_anime[anime_name] = []
                 downloads_by_anime[anime_name].append(download)
 
         for anime_name, anime_downloads in downloads_by_anime.items():
@@ -535,7 +535,7 @@ def downloads_page():
     for download in st.session_state['downloads']:
         anime_name = download['anime_name']
         if anime_name not in downloads_by_anime:
-            downloads_by_anime[anime_name]=[]
+            downloads_by_anime[anime_name] = []
         downloads_by_anime[anime_name].append(download)
 
     # Display downloads grouped by anime
@@ -591,51 +591,57 @@ def batch_download_page():
     with tab1:
         st.header("Add Anime to Batch")
         col1, col2 = st.columns(2)
-        anime_name = col1.text_input("Search Anime:", key="batch_search")
-        if anime_name:
-            response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={anime_name}").text, "html.parser")
-            try:
-                pages = response.find("ul", {"class": "pagination-list"}).find_all("li")
-                animes = [anime for page in pages for anime in get_names(
-                    BeautifulSoup(requests.get(f"{base_url}/search.html{page.a.get('href')}").text, "html.parser"))]
-            except AttributeError:
-                animes = get_names(response)
 
-            if animes:
-                selected_anime = st.radio("Select Anime:", [name for name, _ in animes])
-                if selected_anime:
-                    selected_index = [name for name, _ in animes].index(selected_anime)
-                    selected_url = animes[selected_index][1]
+        with col1:
+            anime_name = col1.text_input("Search Anime:", key="batch_search")
+            if anime_name:
+                response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={anime_name}").text,
+                                         "html.parser")
+                try:
+                    pages = response.find("ul", {"class": "pagination-list"}).find_all("li")
+                    animes = [anime for page in pages for anime in get_names(
+                        BeautifulSoup(requests.get(f"{base_url}/search.html{page.a.get('href')}").text, "html.parser"))]
+                except AttributeError:
+                    animes = get_names(response)
 
-                    # Get episode count
-                    response = BeautifulSoup(requests.get(f"{base_url}{selected_url}").text, "html.parser")
-                    movie_id = response.find("input", {"id": "movie_id"}).get("value")
-                    last_ep = response.find("ul", {"id": "episode_page"}).find_all("a")[-1].get("ep_end")
-                    total_episodes = int(last_ep)
+                if animes:
+                    selected_anime = st.radio("Select Anime:", [name for name, _ in animes])
+                    if selected_anime:
+                        selected_index = [name for name, _ in animes].index(selected_anime)
+                        selected_url = animes[selected_index][1]
 
-                    # Episode selection
-                    st.write(f"Total Episodes: {total_episodes}")
-                    episode_selection = st.text_input(
-                        "Enter episodes (e.g., 1 3 5-7):",
-                        key="batch_episode_selection"
-                    )
+                        # Get episode count
+                        response = BeautifulSoup(requests.get(f"{base_url}{selected_url}").text, "html.parser")
+                        movie_id = response.find("input", {"id": "movie_id"}).get("value")
+                        last_ep = response.find("ul", {"id": "episode_page"}).find_all("a")[-1].get("ep_end")
+                        total_episodes = int(last_ep)
 
-                    if st.button("Add to Batch"):
-                        try:
-                            selected_episodes = parse_episode_selection(episode_selection, total_episodes)
-                            if selected_episodes:
-                                new_item = AnimeDownloadItem(
-                                    name=selected_anime,
-                                    url=selected_url,
-                                    episodes=selected_episodes,
-                                    total_episodes=total_episodes
-                                )
-                                st.session_state['batch_manager'].add_item(new_item)
-                                st.success(f"Added {selected_anime} to batch list")
-                            else:
-                                st.error("Invalid episode selection")
-                        except ValueError:
-                            st.error("Invalid episode selection format")
+                        # Episode selection
+                        st.write(f"Total Episodes: {total_episodes}")
+                        episode_selection = st.text_input(
+                            "Enter episodes (e.g., 1 3 5-7):",
+                            key="batch_episode_selection"
+                        )
+
+                        if st.button("Add to Batch"):
+                            try:
+                                selected_episodes = parse_episode_selection(episode_selection, total_episodes)
+                                if selected_episodes:
+                                    new_item = AnimeDownloadItem(
+                                        name=selected_anime,
+                                        url=selected_url,
+                                        episodes=selected_episodes,
+                                        total_episodes=total_episodes
+                                    )
+                                    st.session_state['batch_manager'].add_item(new_item)
+                                    st.success(f"Added {selected_anime} to batch list")
+                                else:
+                                    st.error("Invalid episode selection")
+                            except ValueError:
+                                st.error("Invalid episode selection format")
+        with col2:
+            selected_url = animes[selected_index][1]
+            display_anime_preview_vanilla(selected_url)
 
     with tab2:
         st.header("View Current list")
@@ -763,10 +769,10 @@ def batch_download_page():
                     try:
                         for item in st.session_state['batch_manager'].download_list:
                             st.write(f"#### {item.name}")
-                            item.name  = re.sub(r'[<>:"/\\|?*]', '_', item.name)
+                            item.name = re.sub(r'[<>:"/\\|?*]', '_', item.name)
 
                             download_path = os.path.join(download_folder, item.name)
-                            
+
                             episode_list = [
                                 {
                                     "episode": str(ep),
@@ -812,13 +818,16 @@ def get_preview(link):
         # for section in anime_info_sections:
         # Extract individual fields
         title = anime_info_section.find("h1").get_text(strip=True) if anime_info_section.find("h1") else None
-        synopsis = anime_info_section.find("div", class_="description").get_text(strip=True) if anime_info_section.find("div",                                                                               class_="description") else None
-        genre_div = anime_info_section.find_all("p", class_='type')[2] if len(anime_info_section.find_all("p", class_="type")) > 2 else None
-        genres = [genre.get_text(strip=True).replace(', ','') for genre in genre_div.find_all("a")] if genre_div else []
+        synopsis = anime_info_section.find("div", class_="description").get_text(strip=True) if anime_info_section.find(
+            "div", class_="description") else None
+        genre_div = anime_info_section.find_all("p", class_='type')[2] if len(
+            anime_info_section.find_all("p", class_="type")) > 2 else None
+        genres = [genre.get_text(strip=True).replace(', ', '') for genre in
+                  genre_div.find_all("a")] if genre_div else []
         release_date_tag = anime_info_section.find_all("p", class_="type")[3] if len(
             anime_info_section.find_all("p", class_="type")) > 3 else None
         release_date = release_date_tag.get_text(strip=True).replace("Released: ", "") if release_date_tag else None
-        release_date = release_date.replace("Released:","")
+        release_date = release_date.replace("Released:", "")
         image_link = anime_info_section.find("img")["src"] if anime_info_section.find("img") else None
 
         # Append the extracted data as a dictionary
@@ -830,11 +839,115 @@ def get_preview(link):
             "image_link": image_link
         })
 
-        print(anime_data)
+        return anime_data
 
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching anime data: {str(e)}")
         return None
+
+
+def display_anime_preview_markdown(selected_anime_link):
+    st.markdown("""
+        <style>
+        .anime-preview {
+            background-color: #f0f4f8;
+            border-radius: 8px;
+            border: 1px solid #e1e4e8;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .anime-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #1f77b4;  /* Streamlit blue */
+        }
+        .anime-details {
+            font-size: 0.9rem;
+            color: #718096;
+            margin-bottom: 10px;
+        }
+        .genre-pill {
+            background-color: #e6f3ff;
+            color: #1c7ed6;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            margin: 2px;
+            display: inline-block;
+            border: 1px solid #a5d8ff;
+        }
+        .synopsis {
+            font-size: 0.85rem;
+            color: #2d3748;
+            text-align: left;
+            max-height: 150px;
+            overflow-y: auto;
+            background-color: #ffffff;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    with st.spinner("Loading details..."):
+        anime_data = get_preview(selected_anime_link)
+
+    anime = anime_data[0]
+
+    st.markdown(f'<div class="anime-preview">', unsafe_allow_html=True)
+
+    if anime["image_link"]:
+        if anime["image_link"]:
+            st.image(anime["image_link"], caption=None, use_container_width=True)
+
+    st.markdown(f'<div class="anime-title">{anime["title"]}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="anime-details">Released: {anime["release_date"]}</div>', unsafe_allow_html=True)
+
+    if anime["genres"]:
+        genre_pills = ' '.join([
+            f'<span class="genre-pill">{genre}</span>'
+            for genre in anime["genres"][:4]
+        ])
+        st.markdown(f'<div class="anime-details">{genre_pills}</div>', unsafe_allow_html=True)
+
+    if anime["synopsis"]:
+        truncated_synopsis = anime["synopsis"][:200] + "..." if len(anime["synopsis"]) > 200 else anime["synopsis"]
+        st.markdown(f'<div class="synopsis">{truncated_synopsis}</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    with st.expander("Full Anime Details"):
+        st.json(anime)
+
+
+def display_anime_preview_vanilla(selected_anime_link):
+    with st.spinner("Loading anime details..."):
+        anime_data = get_preview(selected_anime_link)
+
+    if anime_data and len(anime_data) > 0:
+        anime = anime_data[0]
+
+        # Image
+        st.image(anime["image_link"], caption=anime["title"], use_container_width=True)
+
+        # Title and Release Date
+        st.subheader(anime["title"])
+        st.caption(f"Released: {anime['release_date']}")
+
+        # Genres
+        st.write("### Genres")
+        st.write(" • ".join(anime["genres"]))
+
+        # Synopsis
+        st.write("### Synopsis")
+        st.write(anime["synopsis"])
+
+        # Expandable details
+        with st.expander("Full Details"):
+            st.json(anime)
 
 
 async def download_link_async(session, link):
@@ -985,16 +1098,22 @@ def single_download_page():
     if 'page' not in st.session_state:
         st.session_state['page'] = 'search'
 
-    if st.session_state['page'] == 'search' and animes and anime_name:
-        st.write("#### Anime Search Results")
+    col1, col2 = st.columns([0.6, 0.4])
 
-        # Create radio options with anime names
-        options = [name for name, _ in animes]
-        selected_anime = st.radio("Select an anime:", options, key="anime_radio")
+    if st.session_state['page'] == 'search' and animes and anime_name:
+        with col1:
+            st.write("### Anime Search Results")
+            # Create radio options with anime names
+            options = [name for name, _ in animes]
+            selected_anime = st.radio("Select an anime:", options, key="anime_radio")
+
+        with col2:
+            selected_index = options.index(selected_anime)
+            selected_url = animes[selected_index][1]
+            display_anime_preview_markdown(selected_url)
 
         if selected_anime:
             selected_index = options.index(selected_anime)
-            selected_url = animes[selected_index][1]
 
         if st.button("Continue to Episode Selection"):
             st.session_state['page'] = 'episodes'  # Change page state
@@ -1007,15 +1126,17 @@ def single_download_page():
             st.rerun()
 
         st.write(f"### {st.session_state.selected_anime[0]} episodes")
-        # print(f"{base_url}{st.session_state.selected_anime[1]}")
-        # print(get_preview(st.session_state.selected_anime[1]))
-        # Get episodes data
+        print(f"{base_url}{st.session_state.selected_anime[1]}")
+        print(get_preview(st.session_state.selected_anime[1]))
         response = BeautifulSoup(requests.get(f"{base_url}{st.session_state.selected_anime[1]}").text, "html.parser")
-        base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'", str(response.find("script", {"src": ""}))).group(1)
+        base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'",
+                                     str(response.find("script", {"src": ""}))).group(1)
         movie_id = response.find("input", {"id": "movie_id"}).get("value")
         last_ep = response.find("ul", {"id": "episode_page"}).find_all("a")[-1].get("ep_end")
 
-        episodes_response = BeautifulSoup(requests.get(f"{base_url_cdn_api}ajax/load-list-episode?ep_start=0&ep_end={last_ep}&id={movie_id}").text,"html.parser").find_all("a")
+        episodes_response = BeautifulSoup(
+            requests.get(f"{base_url_cdn_api}ajax/load-list-episode?ep_start=0&ep_end={last_ep}&id={movie_id}").text,
+            "html.parser").find_all("a")
 
         episodes = [
             {
@@ -1036,16 +1157,17 @@ def single_download_page():
             )
 
             if download_method == "Range":
-                col1, col2, col3, col4= st.columns(4)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     start = st.number_input("Start episode", min_value=1, max_value=len(episodes), value=1)
                 with col2:
-                    end = st.number_input("End episode", min_value=start + 1, max_value=len(episodes), value=min(start + 1, len(episodes)))
+                    end = st.number_input("End episode", min_value=start + 1, max_value=len(episodes),
+                                          value=min(start + 1, len(episodes)))
 
                 if st.button("Download Range"):
                     if 'download_started' not in st.session_state or st.session_state['download_started'] is False:
                         st.session_state['download_started'] = True
-                        selected_episodes = episodes[start-1:end]
+                        selected_episodes = episodes[start - 1:end]
                         anime_name = re.sub(r'[<>:"/\\|?*]', '_', anime_name)
                         save_path = os.path.join(download_folder, anime_name)
                         st.session_state['episodes_to_download'] = selected_episodes
@@ -1156,7 +1278,7 @@ def settings_page():
     # Download Location Section
     st.header("Download Location")
     default_path = setup["downloads"]
-    save_path = st.text_input("Download Location:", value=default_path,help="Copy and Paste file path")
+    save_path = st.text_input("Download Location:", value=default_path, help="Copy and Paste file path")
 
     if st.button("Browse..."):
         st.info("Please manually enter the folder path where you want to save the downloads.")
@@ -1168,6 +1290,21 @@ def settings_page():
             changes_made.append(f"Download location changed from '{setup['downloads']}' to '{save_path}'")
         temp_settings["downloads"] = save_path
 
+    st.header("Preview Status")
+
+    previews = ['No Preview', "Plain Preview", "Styled Preview"]
+
+    selected_preview = st.radio(
+        "Select Preview Status:",
+        previews,
+        index=previews.index(setup.get("preview_status", "No Preview"))
+        )
+
+    if selected_preview != setup.get('preview_status'):
+        changes_made.append(
+            f"Preview status changed from {setup.get('preview_status')} to {selected_preview}"
+        )
+    temp_settings['preview_status'] = selected_preview
 
     # Resolution Settings
     st.header("Resolution Settings")
@@ -1180,14 +1317,14 @@ def settings_page():
     )
 
     if selected_resolution != setup.get("download_quality"):
-        changes_made.append(f"Default resolution changed from '{setup.get('default_resolution')}' to '{selected_resolution}'")
+        changes_made.append(
+            f"Default resolution changed from '{setup.get('default_resolution')}' to '{selected_resolution}'")
     temp_settings["download_quality"] = selected_resolution
-
 
     # Concurrent Downloads Settings
     st.header("Download Settings")
 
-    Col1, Col2 = st.columns([0.7,0.3])
+    Col1, Col2 = st.columns([0.7, 0.3])
 
     concurrent_downloads = Col1.empty()
 
@@ -1208,7 +1345,6 @@ def settings_page():
     status_container = st.empty()
     details_container = st.empty()
 
-    # Save Button and Reset Button in columns
     col1, col2 = st.columns(2)
 
     with Col2:
@@ -1354,8 +1490,8 @@ def main():
         ["Single", "Batch", "Settings"],
     )
 
-    # if st.sidebar.checkbox("Show Session State Debug", True):
-    #     st.sidebar.write(st.session_state)
+    if st.sidebar.checkbox("Show Session State Debug", True):
+        st.sidebar.write(st.session_state)
 
     if page == "Single":
         single_download_page()
