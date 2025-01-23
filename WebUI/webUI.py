@@ -24,7 +24,7 @@ download_folder = setup["downloads"]
 captcha_v3 = setup["captcha_v3"]
 download_quality = int(setup["download_quality"])
 max_threads = setup["max_threads"]
-preview_status = "No Preview"
+preview_status = setup["preview_status"]
 
 
 class DownloadState(Enum):
@@ -590,10 +590,13 @@ def batch_download_page():
 
     with tab1:
         st.header("Add Anime to Batch")
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([0.65, 0.35])
 
         with col1:
             anime_name = col1.text_input("Search Anime:", key="batch_search")
+            selected_url = None  # Initialize selected_url outside the conditional block
+            animes = []  # Initialize animes list
+
             if anime_name:
                 response = BeautifulSoup(requests.get(f"{base_url}/search.html?keyword={anime_name}").text,
                                          "html.parser")
@@ -639,9 +642,13 @@ def batch_download_page():
                                     st.error("Invalid episode selection")
                             except ValueError:
                                 st.error("Invalid episode selection format")
+
         with col2:
-            selected_url = animes[selected_index][1]
-            display_anime_preview_vanilla(selected_url)
+            if animes and selected_url:
+                if preview_status == "Plain Preview":
+                    display_anime_preview_vanilla(selected_url)
+                elif preview_status == "Styled Preview":
+                    display_anime_preview_markdown(selected_url)
 
     with tab2:
         st.header("View Current list")
@@ -1110,7 +1117,13 @@ def single_download_page():
         with col2:
             selected_index = options.index(selected_anime)
             selected_url = animes[selected_index][1]
-            display_anime_preview_markdown(selected_url)
+            selected_url = animes[selected_index][1]
+            if preview_status == "Plain Preview":
+                display_anime_preview_vanilla(selected_url)
+            elif preview_status == "Styled Preview":
+                display_anime_preview_markdown(selected_url)
+            else:
+                pass
 
         if selected_anime:
             selected_index = options.index(selected_anime)
