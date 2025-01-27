@@ -16,6 +16,11 @@ import psutil
 import math
 from pathlib import Path
 
+st.set_page_config(
+    page_title="Anime Downloader",
+    page_icon="⛩️"
+)
+
 with open("../WebUI/setup.json", "r") as f:
     setup = json.load(f)
 
@@ -1110,13 +1115,12 @@ def single_download_page():
     if st.session_state['page'] == 'search' and animes and anime_name:
         with col1:
             st.write("### Anime Search Results")
-            # Create radio options with anime names
+
             options = [name for name, _ in animes]
             selected_anime = st.radio("Select an anime:", options, key="anime_radio")
 
         with col2:
             selected_index = options.index(selected_anime)
-            selected_url = animes[selected_index][1]
             selected_url = animes[selected_index][1]
             if preview_status == "Plain Preview":
                 display_anime_preview_vanilla(selected_url)
@@ -1139,8 +1143,8 @@ def single_download_page():
             st.rerun()
 
         st.write(f"### {st.session_state.selected_anime[0]} episodes")
-        print(f"{base_url}{st.session_state.selected_anime[1]}")
-        print(get_preview(st.session_state.selected_anime[1]))
+        # print(f"{base_url}{st.session_state.selected_anime[1]}")
+        # print(get_preview(st.session_state.selected_anime[1]))
         response = BeautifulSoup(requests.get(f"{base_url}{st.session_state.selected_anime[1]}").text, "html.parser")
         base_url_cdn_api = re.search(r"base_url_cdn_api\s*=\s*'([^']*)'",
                                      str(response.find("script", {"src": ""}))).group(1)
@@ -1335,7 +1339,7 @@ def settings_page():
     temp_settings["download_quality"] = selected_resolution
 
     # Concurrent Downloads Settings
-    st.header("Download Settings")
+    st.header("Concurrency Settings")
 
     Col1, Col2 = st.columns([0.7, 0.3])
 
@@ -1351,10 +1355,8 @@ def settings_page():
             help="Set the maximum number of videos that can be downloaded simultaneously"
         )
 
-    # Initial number input
     current_value = create_number_input(setup.get("max_threads", 3))
 
-    # Create status containers for optimization feedback
     status_container = st.empty()
     details_container = st.empty()
 
@@ -1450,13 +1452,11 @@ def settings_page():
                 if os.path.exists(os.path.dirname(temp_settings["downloads"])):
                     save_setup(temp_settings)
 
-                    # Display success message with changes
                     st.success("Settings saved successfully!")
                     st.write("Changes made:")
                     for change in changes_made:
                         st.write(f"• {change}")
 
-                    # Add a delay before rerun to allow user to see the changes
                     time.sleep(2)
                     st.rerun()
                 else:
@@ -1488,7 +1488,7 @@ def settings_page():
                 for change in reset_changes:
                     st.write(f"  • {change}")
 
-            time.sleep(3)
+            time.sleep(5)
             st.rerun()
 
 
@@ -1503,8 +1503,8 @@ def main():
         ["Single", "Batch", "Settings"],
     )
 
-    if st.sidebar.checkbox("Show Session State Debug", True):
-        st.sidebar.write(st.session_state)
+    # if st.sidebar.checkbox("Show Session State Debug", True):
+    #     st.sidebar.write(st.session_state)
 
     if page == "Single":
         single_download_page()
